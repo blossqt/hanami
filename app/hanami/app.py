@@ -11,6 +11,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import shutil
 import sys
 import threading
 import time
@@ -102,17 +103,20 @@ class _Job:
     def __init__(self, name: str, kind: str):
         self.name = name
         self.kind = kind            # 'install', 'update' or 'uninstall'
-        self.phase = 'quit'
+        self.phase = 'download' if kind != 'uninstall' else 'quit'
         self.done = self.total = 0
         self.cancel = threading.Event()
         self.restart = False        # start the app again afterwards
         self.waited = 0.0
+        self.staged: Path | None = None     # the new version, unpacked and checked, waiting to go in
+        self.previous: list[str] = []       # what the old version had in its folder
 
 
 class _Bridge(QObject):
     """Carries results from worker threads back to Qt's."""
     checked = Signal(object)                  # {name: Release or error text}
     progress = Signal(str, str, int, int)     # name, phase, done, total
+    prepared = Signal(str, object)            # name, the staged folder of a checked new version
     finished = Signal(str, object)            # name, files installed (list) or an error (str)
 
 
@@ -134,6 +138,7 @@ class Controller(QObject):
         self._bridge = _Bridge(self)
         self._bridge.checked.connect(self._releases_checked)
         self._bridge.progress.connect(self._job_progress)
+        self._bridge.prepared.connect(self._job_prepared)
         self._bridge.finished.connect(self._job_finished)
         self._make_tray()
         self._listen()
@@ -279,14 +284,17 @@ class Controller(QObject):
     # ------------------------------------------------------------------ installing
 
     def install_app(self, name: str) -> None:
-        """Install an app, or update the copy Hanami installed, from its newest release."""
+        """Install an app, or update the copy Hanami installed, from its newest release.
+
+        The new version is downloaded, unpacked and checked while the old one
+        keeps running; only the swap itself waits for it to quit.
+        """
         if name in self.jobs:
             return
         kind = 'update' if self.settings.installed(name) else 'install'
         job = self.jobs[name] = _Job(name, kind)
         self.problems.pop(name, None)
-        job.restart = kind == 'install' or self._holding(name)
-        self._when_quit(job, self._download)
+        self._download(job)
 
     def uninstall_app(self, name: str, ask: bool = True) -> None:
         if name in self.jobs or not self.settings.installed(name):
@@ -337,6 +345,7 @@ class Controller(QObject):
         record = self.settings.installed(job.name) or {}
         previous = list(record.get('files') or [])
         known = self.latest.get(job.name)
+        job.previous = previous
         job.phase = 'download'
         self._update_window()
         last = [None]
@@ -352,14 +361,40 @@ class Controller(QObject):
             try:
                 release = known or releases.latest(app)
                 self.latest[job.name] = release
-                files = installer.install(app, release, previous, progress, job.cancel)
-                self._bridge.finished.emit(job.name, files)
+                self._bridge.prepared.emit(job.name, installer.prepare(app, release, progress, job.cancel))
             except releases.ReleaseError as error:
                 self._bridge.finished.emit(job.name, str(error))
             except Exception as error:  # noqa: BLE001 - shown on the card, never an error box
                 self._bridge.finished.emit(job.name, f'It didn’t install: {error}')
 
         threading.Thread(target=work, name=f'hanami-install-{app.name}', daemon=True).start()
+
+    def _job_prepared(self, name: str, staged) -> None:
+        job = self.jobs.get(name)
+        if job is None or job.cancel.is_set():
+            shutil.rmtree(staged, ignore_errors=True)
+            if job is not None:
+                self._job_finished(name, 'Cancelled.')
+            return
+        job.staged = staged
+        job.restart = job.kind == 'install' or self._holding(name)
+        job.phase = 'quit'
+        self._when_quit(job, self._place)
+
+    def _place(self, job: _Job) -> None:
+        app = catalog.BY_NAME[job.name]
+        job.phase = 'place'
+        self._update_window()
+
+        def work():
+            try:
+                self._bridge.finished.emit(job.name, installer.finish(app, job.staged, job.previous))
+            except releases.ReleaseError as error:
+                self._bridge.finished.emit(job.name, str(error))
+            except Exception as error:  # noqa: BLE001
+                self._bridge.finished.emit(job.name, f'It didn’t install: {error}')
+
+        threading.Thread(target=work, name=f'hanami-place-{app.name}', daemon=True).start()
 
     def _remove(self, job: _Job) -> None:
         app = catalog.BY_NAME[job.name]
@@ -388,6 +423,8 @@ class Controller(QObject):
         job = self.jobs.pop(name, None)
         if job is None:
             return
+        if isinstance(result, str) and job.staged is not None:
+            shutil.rmtree(job.staged, ignore_errors=True)     # a checked new version that never went in
         if isinstance(result, str):
             self.problems[name] = '' if result == 'Cancelled.' else result
         elif job.kind == 'uninstall':

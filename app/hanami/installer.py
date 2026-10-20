@@ -194,9 +194,9 @@ def place(app: SuiteApp, staged: Path, previous: list[str]) -> list[str]:
     return new
 
 
-def install(app: SuiteApp, release: Release, previous: list[str] | None = None,
-            progress: Progress | None = None, cancel=None) -> list[str]:
-    """Install or update an app from a verified release. Returns the names it put in its folder."""
+def prepare(app: SuiteApp, release: Release, progress: Progress | None = None, cancel=None) -> Path:
+    """Steps 1-3: download, unpack and check, beside the install - all while the
+    old version may still be running. Returns the staged folder."""
     if release.asset is None:
         raise ReleaseError(f'{app.name} {release.version} has no Windows download.')
     catalog.programs().mkdir(parents=True, exist_ok=True)
@@ -209,15 +209,31 @@ def install(app: SuiteApp, release: Release, previous: list[str] | None = None,
         check(app, staged, release.version)
         if cancel is not None and cancel.is_set():
             raise ReleaseError('Cancelled.')
-        if progress:
-            progress('place', 0, 0)
-        names = place(app, staged, previous or [])
     except ReleaseError:
         shutil.rmtree(staged, ignore_errors=True)
         raise
     archive.unlink(missing_ok=True)
+    return staged
+
+
+def finish(app: SuiteApp, staged: Path, previous: list[str] | None = None,
+           progress: Progress | None = None) -> list[str]:
+    """Step 4, once the old version has quit: swap the new one in. Returns what is installed."""
+    if progress:
+        progress('place', 0, 0)
+    try:
+        names = place(app, staged, previous or [])
+    except ReleaseError:
+        shutil.rmtree(staged, ignore_errors=True)
+        raise
     add_shortcut(app)
     return names
+
+
+def install(app: SuiteApp, release: Release, previous: list[str] | None = None,
+            progress: Progress | None = None, cancel=None) -> list[str]:
+    """Install or update an app from a verified release. Returns the names it put in its folder."""
+    return finish(app, prepare(app, release, progress, cancel), previous, progress)
 
 
 def uninstall(app: SuiteApp, names: list[str]) -> None:
