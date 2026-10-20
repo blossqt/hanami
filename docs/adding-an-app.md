@@ -120,6 +120,9 @@ In Hanami:
 
    An app published as a lone exe rather than a zipped folder sets
    `single_exe=True`. One without `--self-test` sets `self_test=False`.
+   An app that opens a window when started, but should stay in the
+   background when Hanami starts it at sign-in, names its quiet-start flag
+   in `startup_args`, as Keytap does with `('--startup',)`.
 2. **`tests/check_copies.py`:** add the app's folders to the lists its copies
    are in. Then run `python tests\check_copies.py`.
 3. **`tests/test_apps.py`:** a test that starts the app from source and checks

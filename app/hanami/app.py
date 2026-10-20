@@ -163,14 +163,18 @@ class Controller(QObject):
     def is_running(self, name: str) -> bool:
         return name in self.host.members or name in self._running
 
-    def open_app(self, name: str) -> None:
-        """Start an app - or, if it is running, bring it up (each app does that for a second start)."""
+    def open_app(self, name: str, startup: bool = False) -> None:
+        """Start an app - or, if it is running, bring it up (each app does that for a second start).
+        At sign-in (startup), with the arguments that keep it in the background."""
         exe = self.settings.exe(name)
         if exe is None:
-            self.show_window()
+            if not startup:
+                self.show_window()
             return
         process = QProcess()
         process.setProgram(str(exe))
+        if startup:
+            process.setArguments(list(catalog.BY_NAME[name].startup_args))
         process.setWorkingDirectory(str(exe.parent))
         environment = QProcessEnvironment()
         for key, value in installer.clean_environment().items():
@@ -189,7 +193,7 @@ class Controller(QObject):
         self._refresh()
         for name in self.settings.start_with:
             if not self.is_running(name):
-                self.open_app(name)
+                self.open_app(name, startup=True)
 
     def _refresh(self) -> None:
         programs = win32.running_programs()

@@ -26,6 +26,9 @@ class SuiteApp:
     release_name: str = ''  # the "app" its latest.json names, when that isn't `name`
     single_exe: bool = False   # its release is the exe itself, not a zip holding its folder
     self_test: bool = True     # its exe answers --self-test <file> with its version
+    # What it is started with at sign-in, to stay in the background rather than open its window.
+    # Only for apps that ask: Grabbit, say, takes any argument for a link to download.
+    startup_args: tuple[str, ...] = ()
 
     @property
     def manifest_app(self) -> str:
@@ -39,7 +42,8 @@ class SuiteApp:
 SUITE = (
     SuiteApp('Keytap', 'Types your Bitwarden logins into any app.', 'Keytap.exe',
              _DOCUMENTS / 'Keytap' / 'dist' / 'Keytap' / 'Keytap.exe',
-             'blossqt/keytap', '080b0717166ed42a3eca16c1ebf1d6b9229114a08479c3082691a854d2d08b05'),
+             'blossqt/keytap', '080b0717166ed42a3eca16c1ebf1d6b9229114a08479c3082691a854d2d08b05',
+             startup_args=('--startup',)),
     SuiteApp('Dropshift', 'Drag a file, press a key, drop it on what it should become.', 'Dropshift.exe',
              _DOCUMENTS / 'Dropshift' / 'dist' / 'Dropshift' / 'Dropshift.exe',
              'blossqt/dropshift', '2805973de0b5ac4baf04e1712bd4143b84fd532d2e03cdec6cfa6f2d929e4f6f'),
