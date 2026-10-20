@@ -6,13 +6,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QFileInfo, QRectF, Qt, Signal
+from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
-from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFileIconProvider, QFrame, QGridLayout,
+from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QGridLayout,
                                QHBoxLayout, QLabel, QMenu, QProgressBar, QPushButton, QToolButton,
                                QVBoxLayout, QWidget)
 
-from .. import __version__
+from .. import __version__, win32
 from ..catalog import SUITE
 from . import icons, theme
 
@@ -137,14 +137,27 @@ class AppCard(QFrame):
         else:
             self.open_clicked.emit(self.app.name)
 
+    def _show_icon(self, exe: Path | None) -> None:
+        """The app's own icon, read from its exe - again whenever the exe is rebuilt or updated."""
+        try:
+            key = (exe, exe.stat().st_mtime) if exe else None
+        except OSError:
+            key = None
+        if key == self._exe and not self.icon.pixmap().isNull():
+            return
+        self._exe = key
+        ratio = self.devicePixelRatioF()
+        image = win32.exe_icon(exe, round(44 * ratio)) if key else None
+        if image is not None:
+            pixmap = QPixmap.fromImage(image)
+            pixmap.setDevicePixelRatio(ratio)
+        else:
+            pixmap = placeholder_icon(self.app.name, 44)
+        self.icon.setPixmap(pixmap)
+
     def show_state(self, s: CardState) -> None:
         self._state = s
-        if s.exe != self._exe or self.icon.pixmap().isNull():
-            self._exe = s.exe
-            pixmap = (QFileIconProvider().icon(QFileInfo(str(s.exe))).pixmap(44, 44) if s.exe else None)
-            if pixmap is None or pixmap.isNull():
-                pixmap = placeholder_icon(self.app.name, 44)
-            self.icon.setPixmap(pixmap)
+        self._show_icon(s.exe)
         self.version.setText(s.version)
         c = theme.colors()
         dim, rose = c.dim.name(), theme.ACCENT if theme.is_dark() else theme.ON_ACCENT

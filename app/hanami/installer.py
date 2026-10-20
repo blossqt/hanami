@@ -266,3 +266,6 @@ def add_shortcut(app: SuiteApp) -> None:
         win32.make_shortcut(shortcut(app), catalog.installed_exe(app))
     except Exception:  # noqa: BLE001 - a missing shortcut is no reason to fail an install
         pass
+    # An update replaces the exe at the same path, and Windows would go on
+    # showing the old version's icon from its cache.
+    win32.icon_changed(catalog.installed_exe(app), shortcut(app))

@@ -24,6 +24,42 @@ kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 CREATE_NO_WINDOW = 0x08000000
 
+user32 = ctypes.WinDLL('user32', use_last_error=True)
+user32.PrivateExtractIconsW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                        ctypes.POINTER(wintypes.HICON), ctypes.POINTER(wintypes.UINT),
+                                        wintypes.UINT, wintypes.UINT]
+user32.PrivateExtractIconsW.restype = wintypes.UINT
+user32.DestroyIcon.argtypes = [wintypes.HICON]
+shell32 = ctypes.WinDLL('shell32', use_last_error=True)
+shell32.SHChangeNotify.argtypes = [wintypes.LONG, wintypes.UINT, ctypes.c_void_p, ctypes.c_void_p]
+SHCNE_UPDATEITEM, SHCNF_PATHW, SHCNF_FLUSH = 0x00002000, 0x0005, 0x1000
+
+
+# --------------------------------------------------------------------------- icons
+
+def exe_icon(path: Path, size: int):
+    """The icon inside an exe, read from the file itself as a QImage - or None.
+
+    Not through the shell, as QFileIconProvider goes: Windows caches icons by
+    path, so an exe rebuilt or updated in place keeps showing its old icon
+    there, sometimes until the next sign-in.
+    """
+    from PySide6.QtGui import QImage
+    icon = wintypes.HICON()
+    if user32.PrivateExtractIconsW(str(path), 0, size, size, ctypes.byref(icon), None, 1, 0) != 1 or not icon:
+        return None
+    try:
+        image = QImage.fromHICON(icon.value)
+    finally:
+        user32.DestroyIcon(icon)
+    return None if image.isNull() else image
+
+
+def icon_changed(*paths: Path) -> None:
+    """Tell Windows these files changed, so the Start menu, taskbar and Explorer drop their cached icons."""
+    for path in paths:
+        shell32.SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW | SHCNF_FLUSH, ctypes.c_wchar_p(str(path)), None)
+
 
 def running_programs() -> set[str]:
     """The full paths, lower case, of every program running as this user."""
