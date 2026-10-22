@@ -56,6 +56,10 @@ The app itself:
   the file. The build, the release script and Hanami's installer all start the
   exe this way before trusting it.
 - **Command-line tools** start with `CREATE_NO_WINDOW`.
+- **A crash log:** copy `app/hanami/suitelog.py` into the app and call
+  `suitelog.start('MyApp')` first thing in `main()`. The windowed exe has no
+  stderr, so this keeps its prints, its tracebacks and a native crash's stack
+  (from a COM or Qt call, say) in `%LOCALAPPDATA%\MyApp\myapp.log`.
 - **One copy at a time:** a second start brings up the first copy (a
   `QLocalServer` named `<app>-<user>`, like Keytap's).
 

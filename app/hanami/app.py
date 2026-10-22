@@ -22,7 +22,7 @@ from PySide6.QtGui import QAction, QDesktopServices, QFont
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import APP_NAME, __version__, catalog, installer, releases, win32
+from . import APP_NAME, __version__, catalog, installer, releases, suitelog, win32
 from .host import TrayHost
 from .ui import icons, theme
 from .ui.launcher import CardState, LauncherWindow
@@ -632,15 +632,6 @@ def send(message: str, reply: bool = False) -> str | None:
     return answer
 
 
-def _log_to_file() -> None:
-    if sys.stderr is not None:
-        return
-    folder = win32.app_data()
-    folder.mkdir(parents=True, exist_ok=True)
-    log = open(folder / 'hanami.log', 'a', encoding='utf-8', buffering=1)  # noqa: SIM115
-    sys.stdout = sys.stderr = log
-
-
 def self_test(argv: list[str]) -> int:
     """Load what a real start loads and answer with the version - the build's check."""
     target = argv[argv.index('--self-test') + 1] if len(argv) > argv.index('--self-test') + 1 else ''
@@ -665,7 +656,7 @@ def self_test(argv: list[str]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
-    _log_to_file()
+    suitelog.start(APP_NAME)
     if '--self-test' in argv:
         return self_test(argv)
     try:
