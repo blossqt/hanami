@@ -160,7 +160,7 @@ class AppCard(QFrame):
         self._show_icon(s.exe)
         self.version.setText(s.version)
         c = theme.colors()
-        dim, rose = c.dim.name(), theme.ACCENT if theme.is_dark() else theme.ON_ACCENT
+        dim, rose = c.dim.name(), theme.ink()
         if s.busy:
             words = _BUSY.get(s.busy, s.busy) + '…'
             if s.busy == 'download' and s.total:
@@ -280,8 +280,7 @@ class LauncherWindow(QWidget):
         """The footer: Hanami's version, and a newer one if there is one."""
         words = f'Hanami {__version__}  ·  Closing this window keeps Hanami in the tray.'
         if newer:
-            colour = theme.ACCENT if theme.is_dark() else theme.ON_ACCENT
-            words += (f'  ·  <a href="hanami" style="color:{colour}; text-decoration:none">'
+            words += (f'  ·  <a href="hanami" style="color:{theme.ink()}; text-decoration:none">'
                       f'Hanami {newer} is out - get it</a>')
         self.foot.setText(words)
 
