@@ -27,9 +27,15 @@ Copy the layout of Keytap's `ui/icons.py`.
   them is `#a61e4d`.
 - As text or a line on the window, the pink is `#ffd1dc` on dark and `#c2255c`
   on white.
-- Copy Keytap's `ui/theme.py` and call `theme.install(app)` right after making
-  the `QApplication`. Its `SuiteStyle` draws check boxes, because Windows 11's
+- Copy `app/hanami/ui/suitetheme.py` into the app's `ui/` folder. It holds
+  the pink, the colours for light and dark, the fonts, the card shadow and
+  stylesheet, and `SuiteStyle`, which draws check boxes because Windows 11's
   own style loses a ticked box's fill under a style sheet.
+- Give the app a `ui/theme.py` that takes all of it
+  (`from .suitetheme import *`), like Hanami's. Colours only this app needs
+  go there too, by subclassing `Colors`, as Keytap's does. Never change the
+  copy of `suitetheme.py` itself: change Hanami's and sync it.
+- Call `theme.install(app)` right after making the `QApplication`.
 
 ## 2. Build it the suite way
 
