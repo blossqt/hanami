@@ -72,8 +72,10 @@ Click the blossom (or open Hanami from Start) for every suite app on one page:
 - under **⋯**: its release notes, **Find it on this PC…** for a copy Hanami
   doesn't know about, and **Uninstall** for one Hanami installed.
 
-**Start Hanami when I sign in to Windows, and with it:** one sign-in entry for
-the whole suite - Hanami starts, then starts the apps ticked there.
+**Start Hanami when I sign in to Windows:** one sign-in entry for the whole
+suite. **Start with Hanami:** whenever Hanami starts - at sign-in or opened
+by hand - it starts the apps ticked there that aren't running yet, in the
+background.
 
 ## Colours
 

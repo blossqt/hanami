@@ -397,10 +397,10 @@ class SettingsWindow(QWidget):
         page, layout = self._page('General', '')
         frame, box = _section('Starting up')
         holder, self.startup = _switch('Start Hanami when I sign in to Windows',
-                                       'It sits in the tray, with the apps below starting in the background.',
+                                       'It starts in the tray, without opening its window.',
                                        starts_with_windows)
         box.addWidget(holder)
-        box.addWidget(_label('Start with it:', 9, role='dim'))
+        box.addWidget(_label('Start with Hanami, in the background:', 9, role='dim'))
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(24)
@@ -422,7 +422,6 @@ class SettingsWindow(QWidget):
                              'app’s own menu, and Quit Hanami.', 9, role='dim', wrap=True))
         layout.addWidget(frame)
         layout.addStretch(1)
-        self._startup_edited(emit=False)
         return page
 
     def _appearance(self) -> QWidget:
@@ -544,11 +543,9 @@ class SettingsWindow(QWidget):
     # ------------------------------------------------------------------ changes
 
     def _startup_edited(self, *_, emit: bool = True) -> None:
-        on = self.startup.isChecked()
-        for check in self.start_with.values():
-            check.setEnabled(on)
         if emit:
-            self.startup_changed.emit(on, [name for name, check in self.start_with.items() if check.isChecked()])
+            self.startup_changed.emit(self.startup.isChecked(),
+                                      [name for name, check in self.start_with.items() if check.isChecked()])
 
     def _updates_edited(self, *_) -> None:
         self.updates_changed.emit(self.check.isChecked(), self.notify.isChecked(), self.auto.isChecked())

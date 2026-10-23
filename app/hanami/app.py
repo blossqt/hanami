@@ -179,9 +179,9 @@ class Controller(QObject):
         self._ticker.timeout.connect(self._show_checked)
         self._ticker.start()
         self._refresh()
-        if startup:
-            QTimer.singleShot(2500, self._start_chosen)
-        elif not DEV:
+        if startup or not DEV:
+            QTimer.singleShot(2500, self._start_chosen)         # whenever Hanami starts, not only at sign-in
+        if not startup and not DEV:
             self.show_window()
         if not self.settings.set_up and getattr(sys, 'frozen', False):
             self.settings.set_up = True
@@ -194,7 +194,7 @@ class Controller(QObject):
 
     def open_app(self, name: str, startup: bool = False) -> None:
         """Start an app - or, if it is running, bring it up (each app does that for a second start).
-        At sign-in (startup), with the arguments that keep it in the background."""
+        Started along with Hanami (startup), with the arguments that keep it in the background."""
         exe = self.settings.exe(name)
         if exe is None:
             if not startup:
@@ -219,6 +219,7 @@ class Controller(QObject):
         QTimer.singleShot(1500, self._refresh)
 
     def _start_chosen(self) -> None:
+        """Start the apps chosen to start with Hanami that aren't running yet, in the background."""
         self._refresh()
         for name in self.settings.start_with:
             if not self.is_running(name):
