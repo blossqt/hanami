@@ -218,6 +218,7 @@ class LauncherWindow(QWidget):
         self.setWindowIcon(icons.app_icon())
         self.setMinimumWidth(700)
         self.setObjectName('launcher')
+        theme.frost(self)
         self._apply_style()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 18)
@@ -270,6 +271,24 @@ class LauncherWindow(QWidget):
         layout.addLayout(bottom)
         self._startup_edited()
 
+        # The suite's look, for every app at once: they pick a change up within seconds.
+        looks = QHBoxLayout()
+        looks.setSpacing(8)
+        looks.addWidget(_label('Look of the suite', 9))
+        self.look_buttons: dict[str, QPushButton] = {}
+        for name, title in theme.LOOKS.items():
+            button = QPushButton(title)
+            button.setCheckable(True)
+            button.setChecked(theme.look() == name)
+            button.setEnabled(theme.glass_on())
+            button.clicked.connect(lambda _, n=name: self._choose_look(n))
+            self.look_buttons[name] = button
+            looks.addWidget(button)
+        if not theme.glass_on():
+            looks.addWidget(_label('Glass needs Windows 11 with transparency effects on', 8, role='dim'))
+        looks.addStretch(1)
+        layout.addLayout(looks)
+
         self.foot = _label('', 8, role='dim')
         self.foot.setTextFormat(Qt.RichText)
         self.foot.linkActivated.connect(lambda _: self.show_page.emit('Hanami'))
@@ -287,10 +306,15 @@ class LauncherWindow(QWidget):
     def _apply_style(self) -> None:
         c = theme.colors()
         self.setStyleSheet(theme.card_style() + f"""
-            QWidget#launcher {{ background: {c.card.name()}; }}
-            QFrame#card {{ background: {c.tile.name()}; border: 1px solid {c.border.name(QColor.HexArgb)};
+            QWidget#launcher {{ background: {theme.css(c.card)}; }}
+            QFrame#card {{ background: {theme.css(c.tile)}; border: 1px solid {c.border.name(QColor.HexArgb)};
                            border-radius: 12px; }}
         """)
+
+    def _choose_look(self, name: str) -> None:
+        theme.set_look(name)
+        for other, button in self.look_buttons.items():
+            button.setChecked(other == name)
 
     def _startup_edited(self, *_) -> None:
         on = self.startup.isChecked()
