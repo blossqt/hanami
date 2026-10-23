@@ -898,10 +898,10 @@ _MARGIN = 56              # how far beyond a window's edges its shot of the scre
 # shrink: the rings' corners.
 _LENSES = {
     'frosted': dict(band=24, reach=24, power=1.5, blur=7, steps=8, corner=GLASS_RADIUS * 2, shrink=1.0),
-    'liquid': dict(band=6, reach=40, rate=0.85, blur=2, steps=9, corner=LIQUID_RADIUS, shrink=1.0),
+    'liquid': dict(band=9, reach=48, rate=0.55, blur=2, steps=10, corner=LIQUID_RADIUS, shrink=1.0),
     # a framed window's rim in the liquid look: only the rings that bend in light from beyond its
     # edges (the window itself fills the rest of its shot)
-    'rim': dict(band=3, reach=40, rate=0.85, blur=2, steps=5, corner=GLASS_RADIUS, shrink=1.0),
+    'rim': dict(band=5, reach=56, rate=0.55, blur=2, steps=6, corner=GLASS_RADIUS, shrink=1.0),
 }
 _LIVE_MS = 33             # how often a moving window takes the screen behind it again
 _SETTLE = 0.35            # and for how long after it stops
@@ -1238,8 +1238,20 @@ def _paint_clear(window: QWidget, event) -> None:
     painter.fillRect(r, tint)
     light = 120 - 50 * _lean(window)
     edge = r.adjusted(0.5, 0.5 - _ABOVE, -0.5, -0.5)
-    _edge_light(painter, edge, GLASS_RADIUS, light, 120 if dark else 200, 1.0)
+    _rim_glow(painter, edge, GLASS_RADIUS, light, 46 if dark else 80)
+    _edge_light(painter, edge, GLASS_RADIUS, light, 175 if dark else 245, 1.3)
     painter.end()
+
+
+def _rim_glow(painter, r: QRectF, radius: float, light: float, alpha: int, depth: int = 7) -> None:
+    """The rim's own light, inside the edge: brightest at the edge and fading smoothly inwards over
+    depth pixels, by which way each bit of the edge faces - the glass's thickness catching the
+    light, without a hard line where the rim meets the rest."""
+    for k in range(depth):
+        inset = 1.0 + k
+        fade = (1 - k / depth) ** 2
+        _edge_light(painter, r.adjusted(inset, inset, -inset, -inset), max(0.5, radius - inset), light,
+                    int(alpha * fade), 1.0)
 
 
 def _paint_frosted(painter, rect, radius: float, lens: QPixmap) -> None:
@@ -1330,8 +1342,8 @@ def _paint_liquid(painter, rect, window: QWidget, lens: QPixmap) -> None:
     shade.setColorAt(1.0, QColor(0, 0, 0, 0))
     painter.fillPath(path, shade)
     light = 120 - 50 * _lean(window)                        # the light's direction, from above-left
-    _edge_light(painter, r, radius, light, 150 if dark else 200, 1.2)
-    _edge_light(painter, r.adjusted(1.6, 1.6, -1.6, -1.6), radius - 1.6, light, 45 if dark else 70, 1.0)
+    _rim_glow(painter, r, radius, light, 40 if dark else 85)
+    _edge_light(painter, r, radius, light, 180 if dark else 245, 1.3)
     painter.restore()
 
 
