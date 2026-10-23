@@ -214,21 +214,20 @@ class _Nav(QWidget):
 
 class _LookTile(QAbstractButton):
     """One of the suite's looks, as a picture of it - a pane of its glass over bright shapes and
-    lines of text - with its name and a word about it below; the chosen one ringed in pink."""
+    lines of text - with its name below; the chosen one ringed in pink."""
 
-    def __init__(self, look: str, title: str, about: str):
+    def __init__(self, look: str, title: str):
         super().__init__()
         self.look = look
         self.title = title
-        self.about = about
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumSize(232, 196)
+        self.setMinimumSize(232, 174)
         self._picture = None
         self._picture_key = None
 
     def sizeHint(self) -> QSize:
-        return QSize(250, 204)
+        return QSize(250, 180)
 
     def _scene(self, width: int, height: int, dpr: float) -> QPixmap:
         """What is behind the pane: bright shapes and lines of text, with room around."""
@@ -311,7 +310,7 @@ class _LookTile(QAbstractButton):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect()).adjusted(3, 3, -3, -3)
-        preview = QRectF(r.x(), r.y(), r.width(), r.height() - 50)
+        preview = QRectF(r.x(), r.y(), r.width(), r.height() - 28)
         key = (round(preview.width()), round(preview.height()), self.devicePixelRatioF(), theme.is_dark())
         if key != self._picture_key:
             self._picture = self._render(preview)
@@ -337,10 +336,6 @@ class _LookTile(QAbstractButton):
         p.setPen(c.text)
         p.setFont(theme.font(10, QFont.DemiBold))
         p.drawText(QRectF(r.x() + 2, preview.bottom() + 6, r.width(), 20), Qt.AlignLeft | Qt.AlignVCenter, self.title)
-        p.setPen(c.dim)
-        p.setFont(theme.font(8.5))
-        p.drawText(QRectF(r.x() + 2, preview.bottom() + 26, r.width() - 4, 22), Qt.AlignLeft | Qt.AlignVCenter
-                   | Qt.TextWordWrap, self.about)
         p.end()
 
 
@@ -463,10 +458,8 @@ class SettingsWindow(QWidget):
         tiles.setSpacing(16)
         self.looks = QButtonGroup(self)
         self.look_tiles: dict[str, _LookTile] = {}
-        about = {'frosted': 'Soft and calm: what is behind blurs.',
-                 'liquid': 'Apple’s: clear, bending light at its edges.'}
         for name, title in theme.LOOKS.items():
-            tile = _LookTile(name, title, about[name])
+            tile = _LookTile(name, title)
             tile.setChecked(theme.look() == name)
             tile.setEnabled(theme.glass_on())
             tile.clicked.connect(lambda _, n=name: theme.set_look(n))
@@ -481,9 +474,8 @@ class SettingsWindow(QWidget):
         layout.addWidget(frame)
 
         frame, box = _section('Motion')
-        holder, self.motion = _switch('Animations', 'Windows fading and rising in, pages sliding, switches springing '
-                                      'across, and the liquid glass’s light. Off as well when Windows’ own animation '
-                                      'effects are off.', theme.motion_chosen())
+        holder, self.motion = _switch('Animations', 'Also off when Windows’ animation effects are off.',
+                                      theme.motion_chosen())
         self.motion.toggled.connect(theme.set_motion)
         box.addWidget(holder)
         layout.addWidget(frame)
@@ -496,7 +488,7 @@ class SettingsWindow(QWidget):
         frame, box = _section('Updates')
         holder, self.check = _switch('Look for updates by itself', 'Twice a day, and when you open Hanami.', check)
         box.addWidget(holder)
-        holder, self.notify = _switch('Tell me when one is out', 'A note from the blossom in the tray.', notify)
+        holder, self.notify = _switch('Tell me when one is out', '', notify)
         box.addWidget(holder)
         holder, self.auto = _switch('Install updates by itself', 'For the apps Hanami installed, while they aren’t '
                                     'running; one you’re using is updated once you quit it.', auto)
