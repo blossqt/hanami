@@ -283,6 +283,21 @@ class RimTests(unittest.TestCase):
         self.assertFalse(region.contains(QPoint(150, 2)), 'nor the top, under the title bar')
         self.assertFalse(region.contains(QPoint(span + 1, 100)))
 
+    def test_a_frosted_window_opens_over_glass_of_its_own_until_windows_has_its_acrylic_up(self):
+        window = QWidget()
+        window.resize(200, 120)
+        shot = QPixmap(200, 120)
+        shot.fill(QColor('#ff0000'))
+        suitetheme._bridge_from(window, shot)
+        glass = window._suite_bridge.toImage()
+        self.assertEqual(glass.size(), shot.size())
+        self.assertLess(glass.pixelColor(100, 60).red(), 255, 'tinted, as Acrylic is')
+        self.assertGreater(glass.pixelColor(100, 60).red(), glass.pixelColor(100, 60).green(), 'what is behind shows')
+        loop = QEventLoop()
+        QTimer.singleShot(suitetheme._BRIDGE_HOLD + suitetheme._BRIDGE_FADE + 300, loop.quit)
+        loop.exec()
+        self.assertIsNone(window._suite_bridge, 'gone once the Acrylic is up')
+
     def test_the_rims_light_is_kept_until_it_moves(self):
         window = QWidget()
         window.resize(300, 200)
