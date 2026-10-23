@@ -254,6 +254,37 @@ class LensTests(unittest.TestCase):
             self.assertEqual((at, tone), (at_too, tone_too))
         self.assertIsNone(suitetheme._made(shot, want, want, 2, True, False)[2], 'no tone asked for, none gauged')
 
+    def test_the_image_of_something_dragged_is_taken_out_of_a_shot(self):
+        shot = QPixmap(120, 80)
+        shot.fill(QColor('#00ff00'))
+        painter = QPainter(shot)
+        painter.fillRect(40, 20, 32, 32, QColor('#ff0000'))                 # a file's image, mid-drag
+        painter.end()
+        healed = suitetheme._heal(shot, [QRect(40, 20, 32, 32)])
+        self.assertEqual(healed.size(), shot.size())
+        reds = [healed.pixelColor(x, y).red() for x in range(36, 76) for y in range(16, 56)]
+        self.assertLess(max(reds), 8, 'nothing of it left: what is around it, across it')
+        self.assertEqual(healed.pixelColor(56, 36).green(), 255)
+        made = suitetheme._made(shot, QRect(0, 0, 120, 80), QRect(0, 0, 120, 80), 1, False, False,
+                                dragged=[QRect(40, 20, 32, 32)])[0]
+        self.assertLess(made.pixelColor(56, 36).red(), 8, 'and the glass made from it')
+        painter = QPainter(shot)
+        painter.fillRect(0, 0, 16, 80, QColor('#ff0000'))                   # one at the shot's edge
+        painter.end()
+        at_edge = suitetheme._heal(shot, [QRect(0, 0, 16, 80)])
+        self.assertEqual(at_edge.pixelColor(8, 40).name(), '#00ff00', 'from the one side it has')
+
+    def test_a_pop_ups_shot_reaches_further_than_a_windows(self):
+        popup = QWidget(None, Qt.FramelessWindowHint | Qt.Tool)
+        popup.setGeometry(400, 300, 200, 120)
+        window = QWidget()
+        window.setGeometry(400, 300, 200, 120)
+        for widget, margin in ((popup, suitetheme._MARGIN_FRAMELESS), (window, suitetheme._MARGIN)):
+            where = suitetheme._where(widget)
+            if where is not None:
+                self.assertEqual(where[3], margin)
+                self.assertEqual(where[2], widget.frameGeometry().adjusted(-margin, -margin, margin, margin))
+
     def test_one_shot_at_a_time_for_each_window(self):
         loop, came = QEventLoop(), []
         grabber = suitetheme._grabber()
