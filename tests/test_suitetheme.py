@@ -19,7 +19,7 @@ for name in ('SUITE_LOOK', 'SUITE_MODE', 'SUITE_MOTION'):
     os.environ.pop(name, None)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
 
-from PySide6.QtCore import QRectF, Qt  # noqa: E402
+from PySide6.QtCore import QEventLoop, QPoint, QRect, QRectF, QSize, Qt, QTimer  # noqa: E402
 from PySide6.QtGui import QColor, QPainter, QPixmap  # noqa: E402
 from PySide6.QtWidgets import (QApplication, QCheckBox, QLineEdit, QPushButton, QStyle, QToolButton,  # noqa: E402
                                QVBoxLayout, QWidget)
@@ -238,6 +238,62 @@ class LensTests(unittest.TestCase):
         self.assertGreater(bright, 0.95)
         self.assertLess(still, 0.01)
         self.assertGreater(lively, 0.1)
+        self.assertEqual(suitetheme._tone(busy.toImage(), QRectF(0, 0, 64, 64))[1], lively,
+                         'the same on the glass thread, from an image')
+
+    def test_a_shot_is_made_into_glass_the_same_on_either_thread(self):
+        m = suitetheme._MARGIN
+        shot = self.shot(200 + 2 * m, 120 + 2 * m)
+        want = QRect(0, 0, 200 + 2 * m, 120 + 2 * m)
+        cut = QRect(0, 0, 150 + 2 * m, 120 + 2 * m)                 # cut short by the screen's edge
+        for got in (want, cut):
+            on_window, at, tone = suitetheme._made(shot.copy(got), got, want, 2, False, True)
+            on_thread, at_too, tone_too = suitetheme._made(shot.copy(got).toImage(), got, want, 2, False, True)
+            self.assertEqual(on_window.size(), want.size())
+            self.assertEqual(on_thread.size(), want.size())
+            self.assertEqual((at, tone), (at_too, tone_too))
+        self.assertIsNone(suitetheme._made(shot, want, want, 2, True, False)[2], 'no tone asked for, none gauged')
+
+    def test_one_shot_at_a_time_for_each_window(self):
+        loop, came = QEventLoop(), []
+        grabber = suitetheme._grabber()
+        self.assertTrue(grabber.take('a', QRect(0, 0, 4, 4), 1.0, lambda image: image.size(),
+                                     lambda made: (came.append(made), loop.quit())))
+        self.assertFalse(grabber.take('a', QRect(0, 0, 4, 4), 1.0, lambda image: None, lambda made: None))
+        QTimer.singleShot(3000, loop.quit)
+        loop.exec()
+        self.assertEqual(came, [QSize(4, 4)], 'taken on its own thread, handed back on this one')
+        self.assertTrue(grabber.take('a', QRect(0, 0, 4, 4), 1.0, lambda image: None, lambda made: None))
+
+
+class RimTests(unittest.TestCase):
+    """A dragged window repaints only its rim, and its rim's light is drawn once and kept."""
+
+    def test_only_the_rim_repaints(self):
+        window = QWidget()
+        window.resize(300, 200)
+        changed = []
+        window.update = changed.append
+        suitetheme._update_rim(window)
+        region = changed[0]
+        span = suitetheme._RIM_SPAN
+        self.assertTrue(region.contains(QPoint(2, 100)) and region.contains(QPoint(297, 100)))
+        self.assertTrue(region.contains(QPoint(150, 197)), 'and along the bottom')
+        self.assertFalse(region.contains(QPoint(150, 100)), 'not the middle')
+        self.assertFalse(region.contains(QPoint(150, 2)), 'nor the top, under the title bar')
+        self.assertFalse(region.contains(QPoint(span + 1, 100)))
+
+    def test_the_rims_light_is_kept_until_it_moves(self):
+        window = QWidget()
+        window.resize(300, 200)
+        edge = QRectF(0.5, 0.5, 299, 199)
+        first = suitetheme._rim_light(window, edge, 8, 120, (80, 245))
+        self.assertIs(suitetheme._rim_light(window, edge, 8, 120, (80, 245)), first)
+        self.assertIsNot(suitetheme._rim_light(window, edge, 8, 121, (80, 245)), first, 'the light moved')
+        image = suitetheme._rim_light(window, edge, 8, 121, (80, 245)).toImage()
+        self.assertGreater(image.pixelColor(150, 0).alpha(), 100, 'bright at the edge')
+        self.assertGreater(image.pixelColor(150, 0).alpha(), image.pixelColor(150, 5).alpha(), 'fading inwards')
+        self.assertEqual(image.pixelColor(150, 100).alpha(), 0, 'nothing in the middle')
 
 
 if __name__ == '__main__':
