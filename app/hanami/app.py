@@ -26,6 +26,7 @@ from . import APP_NAME, __version__, catalog, installer, releases, suitelog, win
 from .host import TrayHost
 from .ui import icons, theme
 from .ui.launcher import CardState, LauncherWindow
+from .ui.settings import SettingsWindow
 
 SERVER_NAME = os.environ.get('HANAMI_INSTANCE') or f'hanami-{os.environ.get("USERNAME", "user")}'
 APP_ID = 'Suite.Hanami'
@@ -88,6 +89,28 @@ class Settings:
     def set_told(self, name: str, version: str) -> None:
         self._store.setValue(f'apps/{name}/told', version)
 
+    def _flag(self, key: str, default: bool) -> bool:
+        return str(self._store.value(key, 'true' if default else 'false')).lower() == 'true'
+
+    @property
+    def check_updates(self) -> bool:
+        """Look for newer releases by itself (and when the window opens)."""
+        return self._flag('updates/check', True)
+
+    @property
+    def notify_updates(self) -> bool:
+        """Say so from the tray when a newer release is out."""
+        return self._flag('updates/notify', True)
+
+    @property
+    def auto_update(self) -> bool:
+        """Install a newer release of an app Hanami installed, while it isn't running."""
+        return self._flag('updates/auto', False)
+
+    def set_updates(self, check: bool, notify: bool, auto: bool) -> None:
+        for key, value in (('check', check), ('notify', notify), ('auto', auto)):
+            self._store.setValue(f'updates/{key}', 'true' if value else 'false')
+
     @property
     def set_up(self) -> bool:
         return str(self._store.value('set_up', 'false')).lower() == 'true'
@@ -128,12 +151,14 @@ class Controller(QObject):
         self.host.changed.connect(self._changed)
         self.host.notified.connect(self._notified)
         self.window: LauncherWindow | None = None
+        self.settings_window: SettingsWindow | None = None
         self._running: set[str] = set()
         self.latest: dict[str, releases.Release] = {}
         self.problems: dict[str, str] = {}
         self.jobs: dict[str, _Job] = {}
         self._checking = False
         self._checked_at = 0.0
+        self._checked_wall = 0.0
         self._versions: dict[tuple, str] = {}
         self._bridge = _Bridge(self)
         self._bridge.checked.connect(self._releases_checked)
@@ -147,8 +172,12 @@ class Controller(QObject):
         self._poll.start()
         self._checks = QTimer(self, interval=CHECK_EVERY * 1000)
         self._checks.timeout.connect(self.check_releases)
-        self._checks.start()
-        QTimer.singleShot(1000 if DEV else 8000, self.check_releases)
+        if self.settings.check_updates:
+            self._checks.start()
+            QTimer.singleShot(1000 if DEV else 8000, self.check_releases)
+        self._ticker = QTimer(self, interval=30000)          # "looked 5 minutes ago" stays true
+        self._ticker.timeout.connect(self._show_checked)
+        self._ticker.start()
         self._refresh()
         if startup:
             QTimer.singleShot(2500, self._start_chosen)
@@ -206,6 +235,7 @@ class Controller(QObject):
         self._running = running
         if changed:
             self._changed()
+            self._auto_update()
         elif self.window is not None and self.window.isVisible():
             self._update_window()
 
@@ -247,6 +277,7 @@ class Controller(QObject):
         if self._checking:
             return
         self._checking = True
+        self._show_checked()
         apps = list(catalog.SUITE) + [catalog.HANAMI]
 
         def work():
@@ -265,6 +296,7 @@ class Controller(QObject):
     def _releases_checked(self, results: dict) -> None:
         self._checking = False
         self._checked_at = time.monotonic()
+        self._checked_wall = time.time()
         for name, result in results.items():
             if isinstance(result, releases.Release):
                 self.latest[name] = result
@@ -273,12 +305,60 @@ class Controller(QObject):
                 # A failed check only matters for an app that isn't here: one
                 # that is keeps working, and is checked again later.
                 self.problems[name] = result if self.settings.exe(name) is None else ''
+        self._auto_update()
         for app in catalog.SUITE:
-            if self.update_available(app.name) and self.settings.told(app.name) != self.latest[app.name].version:
+            if self.update_available(app.name) and app.name not in self.jobs \
+                    and self.settings.told(app.name) != self.latest[app.name].version:
                 self.settings.set_told(app.name, self.latest[app.name].version)
-                self.tray.showMessage('Hanami', f'{app.name} {self.latest[app.name].version} is out. '
-                                      'Open Hanami to update it.', icons.app_icon(), 6000)
+                if self.settings.notify_updates:
+                    self.tray.showMessage('Hanami', f'{app.name} {self.latest[app.name].version} is out. '
+                                          'Open Hanami to update it.', icons.app_icon(), 6000)
         self._update_window()
+        self._show_checked()
+
+    def _auto_update(self) -> None:
+        """With updates installing by themselves: each app Hanami installed that has a newer
+        release and isn't running now. One that is waits until it quits."""
+        if not self.settings.auto_update:
+            return
+        for app in catalog.SUITE:
+            if self.update_available(app.name) and app.name not in self.jobs and not self.is_running(app.name) \
+                    and not self._holding(app.name):
+                self.install_app(app.name)
+
+    def _show_checked(self) -> None:
+        """The settings' line on updates: when Hanami last looked, and what it found."""
+        if self.settings_window is None:
+            return
+        if self._checking:
+            text = 'Looking for updates…'
+        elif not self._checked_wall:
+            text = 'Hanami hasn’t looked yet.' if self.settings.check_updates else 'Hanami looks only when you ask.'
+        else:
+            minutes = int((time.time() - self._checked_wall) // 60)
+            hours = minutes // 60
+            when = ('just now' if minutes < 1 else f'{minutes} minute{"s" if minutes != 1 else ""} ago'
+                    if minutes < 60 else f'{hours} hour{"s" if hours != 1 else ""} ago')
+            out = [f'{app.name} {self.latest[app.name].version}' for app in catalog.SUITE
+                   if self.update_available(app.name)]
+            mine = self.latest.get(catalog.HANAMI.name)
+            if mine and releases.is_newer(mine.version, __version__):
+                out.append(f'Hanami {mine.version}')
+            found = ('Everything is up to date.' if not out else
+                     f'{out[0]} is out.' if len(out) == 1 else f'{", ".join(out[:-1])} and {out[-1]} are out.')
+            text = f'Looked {when}. {found}'
+        self.settings_window.show_checked(text, self._checking)
+
+    def _updates_changed(self, check: bool, notify: bool, auto: bool) -> None:
+        self.settings.set_updates(check, notify, auto)
+        if check and not self._checks.isActive():
+            self._checks.start()
+            if not self._checked_at or time.monotonic() - self._checked_at > CHECK_AGAIN:
+                self.check_releases()
+        elif not check:
+            self._checks.stop()
+        self._auto_update()
+        self._show_checked()
 
     def show_page(self, name: str) -> None:
         app = catalog.HANAMI if name == catalog.HANAMI.name else catalog.BY_NAME[name]
@@ -475,6 +555,7 @@ class Controller(QObject):
         font = QFont(opener.font())
         font.setBold(True)
         opener.setFont(font)
+        menu.addAction('Settings', self.show_settings)
         menu.addAction('Quit Hanami', self.quit)
         names = ', '.join(m.name for m in members)
         self.tray.setToolTip(f'Hanami - {names}' if names else 'Hanami')
@@ -506,7 +587,8 @@ class Controller(QObject):
 
     def show_window(self) -> None:
         if self.window is None:
-            self.window = LauncherWindow(self.settings.start_with, win32.starts_with_windows())
+            self.window = LauncherWindow()
+            self.window.settings_clicked.connect(self.show_settings)
             self.window.open_app.connect(self.open_app)
             self.window.quit_app.connect(self.quit_app)
             self.window.install_app.connect(self.install_app)
@@ -514,13 +596,29 @@ class Controller(QObject):
             self.window.uninstall_app.connect(self.uninstall_app)
             self.window.show_page.connect(self.show_page)
             self.window.exe_chosen.connect(self._exe_chosen)
-            self.window.startup_changed.connect(self._startup_changed)
         self._update_window()
         self.window.show()
         self.window.raise_()
         self.window.activateWindow()
-        if self._checked_at and time.monotonic() - self._checked_at > CHECK_AGAIN:
+        if self.settings.check_updates and self._checked_at and time.monotonic() - self._checked_at > CHECK_AGAIN:
             self.check_releases()
+
+    def show_settings(self, page: str = '') -> None:
+        if self.settings_window is None:
+            s = self.settings
+            self.settings_window = SettingsWindow(s.start_with, win32.starts_with_windows(),
+                                                  (s.check_updates, s.notify_updates, s.auto_update))
+            self.settings_window.startup_changed.connect(self._startup_changed)
+            self.settings_window.updates_changed.connect(self._updates_changed)
+            self.settings_window.check_now.connect(self.check_releases)
+            self.settings_window.show_page.connect(self.show_page)
+            self.settings_window.open_url.connect(lambda url: QDesktopServices.openUrl(QUrl(url)))
+        if page:
+            self.settings_window.open_page(page)
+        self._show_checked()
+        self.settings_window.show()
+        self.settings_window.raise_()
+        self.settings_window.activateWindow()
 
     def card_state(self, name: str) -> CardState:
         exe = self.settings.exe(name)
@@ -587,6 +685,8 @@ class Controller(QObject):
         reply = ''
         if not words or words[0] == 'show':
             self.show_window()
+        elif words[0] == 'settings':
+            self.show_settings(words[1] if len(words) > 1 else '')
         elif words[0] == 'quit':
             QTimer.singleShot(0, self.quit)
         elif DEV and words[0] == 'state':
@@ -639,7 +739,8 @@ def self_test(argv: list[str]) -> int:
     theme.install(app)
     try:
         icons.render_app_icon(32)
-        LauncherWindow([], False).grab()        # painted, never shown
+        LauncherWindow().grab()                  # painted, never shown
+        SettingsWindow([], False, (True, True, False)).grab()
         win32.running_programs()
         releases.verify_and_parse                # the release checks are in the build
         installer.exe_version(Path(sys.executable))
@@ -686,5 +787,4 @@ def main(argv: list[str] | None = None) -> int:
     if not controller.host.listening:
         QMessageBox.warning(None, 'Hanami', 'Hanami could not open its tray link; the apps will keep '
                             'their own icons.')
-    app.styleHints().colorSchemeChanged.connect(lambda *_: None)
     return app.exec()

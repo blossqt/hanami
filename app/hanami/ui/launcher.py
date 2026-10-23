@@ -8,13 +8,13 @@ from pathlib import Path
 
 from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
-from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QGridLayout,
-                               QHBoxLayout, QLabel, QMenu, QProgressBar, QPushButton, QToolButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QProgressBar,
+                               QPushButton, QToolButton, QVBoxLayout, QWidget)
 
 from .. import __version__, win32
 from ..catalog import SUITE
 from . import icons, theme
+from .settings import glyph_font
 
 
 def _label(text: str, size: float, weight=QFont.Normal, role: str = '') -> QLabel:
@@ -210,16 +210,15 @@ class LauncherWindow(QWidget):
     uninstall_app = Signal(str)
     show_page = Signal(str)
     exe_chosen = Signal(str, str)
-    startup_changed = Signal(bool, list)
+    settings_clicked = Signal()
 
-    def __init__(self, start_with: list[str], starts_with_windows: bool):
+    def __init__(self):
         super().__init__()
         self.setWindowTitle('Hanami')
         self.setWindowIcon(icons.app_icon())
         self.setMinimumWidth(700)
         self.setObjectName('launcher')
-        theme.frost(self)
-        self._apply_style()
+        theme.frost(self, backdrop=theme.BACKDROP)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 22, 24, 18)
         layout.setSpacing(16)
@@ -230,6 +229,15 @@ class LauncherWindow(QWidget):
         logo.setPixmap(icons.render_app_icon(40))
         top.addWidget(logo, 0, Qt.AlignVCenter)
         top.addWidget(_label('Hanami', 17, QFont.DemiBold), 1, Qt.AlignVCenter)
+        self.settings = QToolButton()
+        self.settings.setObjectName('settingsButton')
+        self.settings.setText('')
+        self.settings.setFont(glyph_font(13))
+        self.settings.setToolTip('Settings')
+        self.settings.setCursor(Qt.PointingHandCursor)
+        self.settings.setFixedSize(38, 38)
+        self.settings.clicked.connect(self.settings_clicked)
+        top.addWidget(self.settings, 0, Qt.AlignVCenter)
         layout.addLayout(top)
 
         grid = QGridLayout()
@@ -244,55 +252,19 @@ class LauncherWindow(QWidget):
             card.uninstall_clicked.connect(self.uninstall_app)
             card.page_clicked.connect(self.show_page)
             card.locate_clicked.connect(self._locate)
+            theme.light_up(card, 18)
             self.cards[app.name] = card
             grid.addWidget(card, index // 2, index % 2)
         for column in (0, 1):
             grid.setColumnStretch(column, 1)
         layout.addLayout(grid)
-
-        bottom = QVBoxLayout()
-        bottom.setSpacing(8)
-        self.startup = QCheckBox('Start Hanami when I sign in to Windows, and with it:')
-        self.startup.setChecked(starts_with_windows)
-        bottom.addWidget(self.startup)
-        row = QHBoxLayout()
-        row.setContentsMargins(28, 0, 0, 0)
-        row.setSpacing(18)
-        self.start_with: dict[str, QCheckBox] = {}
-        for app in SUITE:
-            box = QCheckBox(app.name)
-            box.setChecked(app.name in start_with)
-            box.toggled.connect(self._startup_edited)
-            self.start_with[app.name] = box
-            row.addWidget(box)
-        row.addStretch(1)
-        bottom.addLayout(row)
-        self.startup.toggled.connect(self._startup_edited)
-        layout.addLayout(bottom)
-        self._startup_edited()
-
-        # The suite's look, for every app at once: they pick a change up within seconds.
-        looks = QHBoxLayout()
-        looks.setSpacing(8)
-        looks.addWidget(_label('Look of the suite', 9))
-        self.look_buttons: dict[str, QPushButton] = {}
-        for name, title in theme.LOOKS.items():
-            button = QPushButton(title)
-            button.setCheckable(True)
-            button.setChecked(theme.look() == name)
-            button.setEnabled(theme.glass_on())
-            button.clicked.connect(lambda _, n=name: self._choose_look(n))
-            self.look_buttons[name] = button
-            looks.addWidget(button)
-        if not theme.glass_on():
-            looks.addWidget(_label('Glass needs Windows 11 with transparency effects on', 8, role='dim'))
-        looks.addStretch(1)
-        layout.addLayout(looks)
+        layout.addStretch(1)
 
         self.foot = _label('', 8, role='dim')
         self.foot.setTextFormat(Qt.RichText)
         self.foot.linkActivated.connect(lambda _: self.show_page.emit('Hanami'))
         layout.addWidget(self.foot)
+        theme.restyle(self, self._style)
         self.show_hanami('')
 
     def show_hanami(self, newer: str) -> None:
@@ -303,24 +275,12 @@ class LauncherWindow(QWidget):
                       f'Hanami {newer} is out - get it</a>')
         self.foot.setText(words)
 
-    def _apply_style(self) -> None:
+    def _style(self) -> str:
         c = theme.colors()
-        self.setStyleSheet(theme.card_style() + f"""
+        return theme.card_style() + theme.panel_css('QFrame#card', 12) + f"""
             QWidget#launcher {{ background: {theme.css(c.card)}; }}
-            QFrame#card {{ background: {theme.css(c.tile)}; border: 1px solid {c.border.name(QColor.HexArgb)};
-                           border-radius: 12px; }}
-        """)
-
-    def _choose_look(self, name: str) -> None:
-        theme.set_look(name)
-        for other, button in self.look_buttons.items():
-            button.setChecked(other == name)
-
-    def _startup_edited(self, *_) -> None:
-        on = self.startup.isChecked()
-        for box in self.start_with.values():
-            box.setEnabled(on)
-        self.startup_changed.emit(on, [name for name, box in self.start_with.items() if box.isChecked()])
+            QToolButton#settingsButton {{ color: {c.text.name()}; padding: 0px; }}
+        """
 
     def _locate(self, name: str) -> None:
         path, _ = QFileDialog.getOpenFileName(self, f'Where is {name}?', str(Path.home() / 'Documents'),

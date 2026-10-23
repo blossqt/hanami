@@ -28,7 +28,7 @@ a = Analysis(
     [os.path.join(app_dir, 'main.py')],
     pathex=[app_dir],
     binaries=qt_plugin_binaries,
-    datas=[],
+    datas=[(os.path.join(app_dir, 'hanami', 'ui', 'backdrop.jpg'), os.path.join('hanami', 'ui'))],     # the window's faint photo
     hiddenimports=hiddenimports,
     hookspath=[],
     excludes=[

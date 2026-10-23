@@ -139,3 +139,8 @@ pipe and instance names of their own):
 - `tests\test_apps.py` - Keytap and Dropshift from source, folding into Hanami
 - `tests\test_install.py` - checking, installing, updating and removing, against a
   stand-in GitHub on this PC with releases signed by a test key
+
+## Photo
+
+The cherry blossom faintly behind Hanami's windows is a photo by Mi Min on Unsplash
+(https://unsplash.com/photos/pkpqoBp11Jc), used under the Unsplash License.
