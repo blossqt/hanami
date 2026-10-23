@@ -7,7 +7,8 @@ each release carries
     latest.json        which version it is, and the file's name, size and SHA-256
     latest.json.sig    an Ed25519 signature over latest.json's exact bytes
 
-Hanami fetches both from GitHub's stable "latest release" address and believes
+Hanami fetches the manifest from GitHub's stable "latest release" address, and
+its signature from the release the manifest names (see latest()), and believes
 the manifest only when the signature checks out against the public key in the
 catalog. A download is then believed only if its size and SHA-256 are the ones
 the signed manifest gives. So nobody who got into a GitHub account - or between
@@ -146,12 +147,34 @@ def _fetch(url: str, timeout: float) -> bytes:
         return response.read(1 << 20)          # a manifest is a few hundred bytes
 
 
+def _named_version(manifest: bytes) -> str | None:
+    """The version a manifest says it is, before it is believed - only to know which release's
+    signature to fetch for it, so only as plain numbers."""
+    try:
+        version = parse_version(json.loads(manifest.decode('utf-8')).get('version'))
+    except (UnicodeDecodeError, ValueError, AttributeError):
+        return None
+    return '.'.join(map(str, version)) if version else None
+
+
 def latest(app: SuiteApp, timeout: float = 15) -> Release:
-    """The app's newest release, verified. Raises ReleaseError and nothing else."""
+    """The app's newest release, verified. Raises ReleaseError and nothing else.
+
+    The signature is fetched from the release the manifest names, not from the "latest release"
+    address as the manifest is: GitHub caches the two files apart, and for a few minutes after a
+    release one can be the new release's and the other the last one's - a pair that would never
+    match, and would look like a forgery."""
     base = f'{site(app)}/releases/latest/download'
     try:
         manifest = _fetch(f'{base}/{MANIFEST_NAME}', timeout)
-        signature = _fetch(f'{base}/{SIGNATURE_NAME}', timeout)
+        named = _named_version(manifest)
+        try:
+            signature = _fetch(f'{site(app)}/releases/download/v{named}/{SIGNATURE_NAME}' if named
+                               else f'{base}/{SIGNATURE_NAME}', timeout)
+        except urllib.error.HTTPError as error:
+            if error.code != 404 or not named:
+                raise
+            signature = _fetch(f'{base}/{SIGNATURE_NAME}', timeout)
     except urllib.error.HTTPError as error:
         if error.code == 404:
             raise ReleaseError(f'{app.name} has no release yet.') from None

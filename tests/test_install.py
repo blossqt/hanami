@@ -50,10 +50,12 @@ def publish(repo: str, app: str, version: str, name: str, data: bytes, *, signed
             'android': None}
     body['desktop'].update(claim or {})
     manifest = (json.dumps(body, indent=2) + '\n').encode()
+    signature = base64.b64encode(ed25519.sign(signed_by, manifest))
     latest = SITE / repo / 'releases' / 'latest' / 'download'
     latest.mkdir(parents=True, exist_ok=True)
-    (latest / 'latest.json').write_bytes(manifest)
-    (latest / 'latest.json.sig').write_bytes(base64.b64encode(ed25519.sign(signed_by, manifest)))
+    for where in (folder, latest):                  # in the release, and at the "latest release" address
+        (where / 'latest.json').write_bytes(manifest)
+        (where / 'latest.json.sig').write_bytes(signature)
 
 
 def zipped(folder: Path, root: str, extra: dict | None = None) -> bytes:
@@ -107,6 +109,17 @@ class ReleaseTest(unittest.TestCase):
         other = SuiteApp('Other', '', 'Other.exe', WORK / 'x', 'test/other', 'unused', single_exe=True)
         with self.assertRaisesRegex(releases.ReleaseError, 'different app'):
             releases.latest(other)
+
+    def test_a_stale_cache_of_the_latest_release_is_no_forgery(self):
+        """GitHub caches the "latest release" files apart: just after a release, the manifest can
+        still be the last release's while the signature is already the new one's."""
+        cached = SuiteApp('Cached', '', 'Cached.exe', WORK / 'x', 'test/cached', 'unused', single_exe=True)
+        publish('test/cached', 'Cached', '1.0.0', 'Cached.exe', b'MZ one')
+        last = (SITE / 'test/cached/releases/latest/download/latest.json').read_bytes()
+        publish('test/cached', 'Cached', '1.1.0', 'Cached.exe', b'MZ two')
+        self.assertEqual(releases.latest(cached).version, '1.1.0')
+        (SITE / 'test/cached/releases/latest/download/latest.json').write_bytes(last)
+        self.assertEqual(releases.latest(cached).version, '1.0.0', 'the last release, believed until the cache catches up')
 
     def test_an_app_without_releases_says_so(self):
         missing = SuiteApp('Missing', '', 'Missing.exe', WORK / 'x', 'test/missing', 'unused')
