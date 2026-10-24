@@ -13,6 +13,7 @@ import time
 import unittest
 import winreg
 from pathlib import Path
+from unittest import mock
 
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 for name in ('SUITE_LOOK', 'SUITE_MODE', 'SUITE_MOTION'):
@@ -328,6 +329,31 @@ class RimTests(unittest.TestCase):
         QTimer.singleShot(suitetheme._BRIDGE_HOLD + suitetheme._BRIDGE_FADE + 300, loop.quit)
         loop.exec()
         self.assertIsNone(window._suite_bridge, 'gone once the Acrylic is up')
+
+    def test_its_glass_while_it_opens_comes_from_its_rims_shot(self):
+        window = QWidget()
+        window.setGeometry(300, 200, 200, 120)
+        m = suitetheme._MARGIN
+        shot = QPixmap(200 + 2 * m, 120 + 2 * m)
+        shot.fill(QColor('#0000ff'))
+        painter = QPainter(shot)
+        painter.fillRect(m, m, 200, 120, QColor('#ff0000'))                 # what is behind the window
+        painter.end()
+        window._suite_shot, window._suite_shot_at = shot, window.geometry().topLeft() - QPoint(m, m)
+        suitetheme._bridge(window)
+        glass = window._suite_bridge.toImage()
+        self.assertEqual(glass.size(), QSize(200, 120))
+        middle = glass.pixelColor(100, 60)
+        self.assertGreater(middle.red(), middle.blue(), 'what is behind the window, not beside it')
+
+    def test_a_framed_windows_rim_bends_in_what_is_beyond_it_in_either_look(self):
+        window = QWidget()
+        suitetheme.frost(window)
+        with mock.patch.object(suitetheme, 'glass_on', lambda: True):
+            for name in suitetheme.LOOKS:
+                with mock.patch.object(suitetheme, 'look', lambda: name):
+                    self.assertTrue(suitetheme._screen_glass(window), name)
+        self.assertFalse(suitetheme._screen_glass(window), 'no glass, nothing taken from the screen')
 
     def test_the_rims_light_is_kept_until_it_moves(self):
         window = QWidget()
