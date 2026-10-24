@@ -16,7 +16,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from PySide6.QtCore import (QEasingCurve, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, Qt, QTimer,
+from PySide6.QtCore import (QEasingCurve, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer,
                             QVariantAnimation, Signal)
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QToolTip, QVBoxLayout, QWidget
@@ -265,6 +265,8 @@ class EdgePanel(QWidget):
         self.place = 0.5
         self._dragging = False
         self._photo = QPixmap(PHOTO)
+        self._photo_cropped: QPixmap | None = None
+        self._photo_key = None
         self._resting_since: float | None = None
         self._left_at: float | None = None
         self._sliding: QPropertyAnimation | None = None
@@ -512,25 +514,29 @@ class EdgePanel(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform)
         rect = QRectF(self.rect())
         radius = theme.LIQUID_RADIUS if theme.look() == 'liquid' and theme.glass_on() else theme.GLASS_RADIUS
         theme.paint_glass(painter, rect, radius)
-        inner = rect.adjusted(1, 1, -1, -1)
-        path = QPainterPath()
-        path.addRoundedRect(inner, radius - 1, radius - 1)
-        dark = theme.is_dark()
-        if not self._photo.isNull():
-            painter.save()
+        photo = self._cropped_photo()
+        if photo is not None:
+            path = QPainterPath()
+            path.addRoundedRect(rect, radius, radius)
             painter.setClipPath(path)
-            painter.setOpacity(0.5 if dark else 0.7)
-            photo = self._photo.size().scaled(inner.size().toSize(), Qt.KeepAspectRatioByExpanding)
-            place = QRectF(inner.center().x() - photo.width() / 2, inner.center().y() - photo.height() / 2,
-                           photo.width(), photo.height())
-            painter.drawPixmap(place, self._photo, QRectF(self._photo.rect()))
-            painter.restore()
-        painter.fillPath(path, QColor(30, 24, 36, 90) if dark else QColor(255, 255, 255, 40))
-        painter.setPen(QPen(QColor(255, 255, 255, 90 if dark else 200), 1))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+            painter.setOpacity(theme.BACKDROP_OPACITY)      # as faint as the main windows' backdrops
+            painter.drawPixmap(0, 0, photo)
         painter.end()
+
+    def _cropped_photo(self) -> QPixmap | None:
+        """The photo, cropped to fill the panel - made again only when the panel's size changes."""
+        if self._photo.isNull():
+            return None
+        dpr = self.devicePixelRatioF()
+        key = (self.width(), self.height(), dpr)
+        if self._photo_key != key:
+            size = QSize(round(self.width() * dpr), round(self.height() * dpr))
+            scaled = self._photo.scaled(size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            cropped = scaled.copy((scaled.width() - size.width()) // 2, (scaled.height() - size.height()) // 2,
+                                  size.width(), size.height())
+            cropped.setDevicePixelRatio(dpr)
+            self._photo_cropped, self._photo_key = cropped, key
+        return self._photo_cropped
