@@ -1,11 +1,14 @@
-"""The edge panel: rest the pointer at the middle of the screen's edge, and a pane of glass slides
-out there over a photo of blossom, holding the suite's apps and the sound switch.
+"""The edge panel: rest the pointer on the little tab at the screen's edge (or click it), and a pane
+of glass slides out there over a photo of blossom, holding the suite's apps and the sound switch.
+The tab shows where the panel is, as Samsung's edge panel's does. It sits in the middle of the edge
+until it is moved - the tab dragged up or down, or the handle along the panel's top (place: where
+along the edge its middle is, as a share of the screen's height). The tab keeps out of the way of
+games and anything else full screen (quiet), and of the panel itself while that is out.
 
 Only an edge with no screen beyond it counts - the pointer can rest there, and passing through to
 another screen never brings the panel out - and the pointer has to stay a moment (DWELL), with no
-button held. Hanami says when the panel may come out at all (allowed): not over a game or anything
-else full screen. It slides away once the pointer has left it for a moment (LEAVE), and after a
-choice in it.
+button held, and not over a game or anything else full screen (quiet, as Hanami says). It slides
+away once the pointer has left it for a moment (LEAVE), and after a choice in it.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from PySide6.QtCore import (QEasingCurve, QPoint, QPointF, QPropertyAnimation, Q
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QToolTip, QVBoxLayout, QWidget
 
+from .. import win32
 from . import icons, theme
 from .sound import SoundToggle
 
@@ -28,7 +32,8 @@ MARGIN = 10             # between the panel and the screen's edge
 DWELL = 0.3             # s the pointer rests at the edge before the panel comes out
 LEAVE = 0.45            # s after the pointer leaves it before it slides away
 WATCH_MS = 60
-REACH = 0.25            # the part of the edge that counts: all but this share at either end
+TAB = 10, 76            # the tab's window, at the edge; its bar is narrower, a little in from the edge
+TAB_EVERY = 0.4         # s between looks at whether the tab should show, and where
 EDGES = {'right': 'Right', 'left': 'Left'}
 
 
@@ -38,8 +43,7 @@ def pointer() -> QPoint:
 
 
 def at_edge(point: QPoint, edge: str) -> QRect | None:
-    """The screen whose edge the pointer rests on, at the middle part of it, with no screen beyond -
-    or None."""
+    """The screen whose edge the pointer rests on, with no screen beyond - or None."""
     screen = QGuiApplication.screenAt(point)
     if screen is None:
         return None
@@ -50,8 +54,140 @@ def at_edge(point: QPoint, edge: str) -> QRect | None:
         on, beyond = point.x() <= g.left() + 1, QPoint(g.left() - 2, point.y())
     else:
         return None
-    middle = g.top() + g.height() * REACH <= point.y() <= g.bottom() - g.height() * REACH
-    return g if on and middle and QGuiApplication.screenAt(beyond) is None else None
+    return g if on and QGuiApplication.screenAt(beyond) is None else None
+
+
+def home_screen(edge: str) -> QRect | None:
+    """The screen the tab sits on: one whose edge on that side has no screen beyond - the main
+    screen if it is one."""
+    screens = QGuiApplication.screens()
+    primary = QGuiApplication.primaryScreen()
+
+    def outer(screen) -> bool:
+        g = screen.geometry()
+        x = g.right() + 2 if edge == 'right' else g.left() - 2
+        return QGuiApplication.screenAt(QPoint(x, g.center().y())) is None
+    found = [s for s in screens if outer(s)]
+    if not found:
+        return None
+    return (primary if primary in found else found[0]).geometry()
+
+
+class _EdgeTab(QWidget):
+    """The little tab at the screen's edge: where the panel is. Clicked, it brings the panel out;
+    dragged, it moves up or down the edge."""
+    clicked = Signal()
+    dragged = Signal(int)           # where its middle would be, as the pointer moves
+    dropped = Signal()
+
+    def __init__(self):
+        super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus
+                         | Qt.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setFixedSize(*TAB)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip('Hanami - click, or drag to move')
+        self.edge = 'right'
+        self._press: float | None = None
+        self._moving = False
+        self._hover = False
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._press, self._moving = event.globalPosition().y(), False
+
+    def mouseMoveEvent(self, event):
+        if self._press is None:
+            return
+        y = event.globalPosition().y()
+        if not self._moving and abs(y - self._press) > 4:
+            self._moving = True
+            self.setCursor(Qt.SizeVerCursor)
+        if self._moving:
+            self.dragged.emit(round(y))
+
+    def mouseReleaseEvent(self, event):
+        if self._press is None or event.button() != Qt.LeftButton:
+            return
+        moved, self._press, self._moving = self._moving, None, False
+        self.setCursor(Qt.PointingHandCursor)
+        if moved:
+            self.dropped.emit()
+        else:
+            self.clicked.emit()
+
+    def enterEvent(self, event):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self.update()
+
+    def paintEvent(self, event):
+        c = theme.colors()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        lit = self._hover or self._moving
+        width = 7 if lit else 5
+        x = self.width() - width - 2 if self.edge == 'right' else 2
+        bar = QRectF(x, 1, width, self.height() - 2)
+        fill = QColor(theme.ACCENT)
+        fill.setAlpha(255 if lit else 200)
+        painter.setPen(QPen(c.edge, 1))
+        painter.setBrush(fill)
+        painter.drawRoundedRect(bar, width / 2, width / 2)
+        painter.end()
+
+
+class _Handle(QWidget):
+    """The grip along the panel's top: dragged, the panel follows up or down the edge."""
+    dragged = Signal(int)           # where the panel's top would be, as the pointer moves
+    dropped = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(WIDTH - 24, 14)
+        self.setCursor(Qt.SizeVerCursor)
+        self.setToolTip('Drag to move')
+        self.setAccessibleName('Move the panel')
+        self._grab: float | None = None
+        self._hover = False
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._grab = event.globalPosition().y() - self.window().y()
+
+    def mouseMoveEvent(self, event):
+        if self._grab is not None:
+            self.dragged.emit(round(event.globalPosition().y() - self._grab))
+
+    def mouseReleaseEvent(self, event):
+        if self._grab is not None and event.button() == Qt.LeftButton:
+            self._grab = None
+            self.dropped.emit()
+
+    def enterEvent(self, event):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self.update()
+
+    def paintEvent(self, event):
+        c = theme.colors()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        color = QColor(c.text if self._hover or self._grab is not None else c.dim)
+        color.setAlpha(230 if self._hover or self._grab is not None else 170)
+        painter.setBrush(color)
+        grip = QRectF(0, 0, 30, 4)
+        grip.moveCenter(QPointF(self.width() / 2, self.height() / 2))
+        painter.drawRoundedRect(grip, 2, 2)
+        painter.end()
 
 
 class _AppButton(QWidget):
@@ -113,18 +249,21 @@ class _AppButton(QWidget):
 class EdgePanel(QWidget):
     open_app = Signal(str)
     open_hanami = Signal()
+    moved = Signal(float)               # dropped by its handle: where along the edge it is now (place)
     output_clicked = Signal(str)        # 'speakers' or 'headphones'
     showing = Signal()                  # about to come out: the apps and the sound, as they are now
 
-    def __init__(self, allowed=lambda: True):
+    def __init__(self, quiet=lambda: False):
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint | Qt.WindowDoesNotAcceptFocus
                          | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         theme.frost(self, fade=False)               # it slides out instead
         self.setFixedWidth(WIDTH)
-        self.allowed = allowed
+        self.quiet = quiet
         self.edge: str | None = None
+        self.place = 0.5
+        self._dragging = False
         self._photo = QPixmap(PHOTO)
         self._resting_since: float | None = None
         self._left_at: float | None = None
@@ -132,8 +271,13 @@ class EdgePanel(QWidget):
         self._leaving = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 14, 12, 14)
+        layout.setContentsMargins(12, 4, 12, 14)
         layout.setSpacing(8)
+        self.handle = _Handle()
+        self.handle.dragged.connect(self._drag_to)
+        self.handle.dropped.connect(self._dropped)
+        layout.addWidget(self.handle, 0, Qt.AlignHCenter)
+        layout.addSpacing(-4)
         self.hanami = _AppButton('Hanami', icons.render_app_icon(ICON), False)
         self.hanami.clicked.connect(lambda _: self._chose(self.open_hanami.emit))
         layout.addWidget(self.hanami, 0, Qt.AlignHCenter)
@@ -149,6 +293,12 @@ class EdgePanel(QWidget):
         self._watch = QTimer(self)
         self._watch.setInterval(WATCH_MS)
         self._watch.timeout.connect(self._look)
+        self.tab = _EdgeTab()
+        self.tab.clicked.connect(self._tab_clicked)
+        self.tab.dragged.connect(self._tab_dragged)
+        self.tab.dropped.connect(self._tab_dropped)
+        self._tab_looked = 0.0
+        self._tab_dragging = False
 
     # ------------------------------------------------------------------ what it holds
 
@@ -175,16 +325,72 @@ class EdgePanel(QWidget):
         """Watch that edge of the screen ('left' or 'right'), or none."""
         self.edge = edge if edge in EDGES else None
         self._resting_since = None
+        self._tab_looked = 0.0
         if self.edge:
+            self.tab.edge = self.edge
             self._watch.start()
+            self._show_tab()
         else:
             self._watch.stop()
+            self.tab.hide()
             if self.isVisible():
                 self.hide()
+
+    # ------------------------------------------------------------------ the tab
+
+    def allowed(self) -> bool:
+        """Whether it may come out now: not over a game or anything full screen, nor mid-drag."""
+        return not self.quiet() and not win32.buttons_down()
+
+    def _middle(self, screen: QRect, height: int) -> int:
+        """Where along that screen's edge something of that height has its middle, at place - all
+        of it on the screen."""
+        middle = screen.top() + self.place * screen.height()
+        return round(max(screen.top() + MARGIN + height / 2, min(middle, screen.bottom() + 1 - MARGIN - height / 2)))
+
+    def _show_tab(self) -> None:
+        """The tab where the panel is - unless the panel is out, or something full screen is in front."""
+        home = home_screen(self.edge) if self.edge else None
+        if home is None or self.isVisible() or self.quiet():
+            self.tab.hide()
+            return
+        x = home.right() + 1 - TAB[0] if self.edge == 'right' else home.left()
+        place = QPoint(x, self._middle(home, TAB[1]) - TAB[1] // 2)
+        if self.tab.pos() != place:
+            self.tab.move(place)
+        if not self.tab.isVisible():
+            self.tab.show()
+
+    def _tab_clicked(self) -> None:
+        home = home_screen(self.edge) if self.edge else None
+        if home is not None and not self.isVisible() and not self.quiet():
+            self.slide_out(home)
+
+    def _tab_dragged(self, middle: int) -> None:
+        home = home_screen(self.edge) if self.edge else None
+        if home is None:
+            return
+        self._tab_dragging = True
+        self._resting_since = None
+        top = max(home.top() + MARGIN, min(middle - TAB[1] // 2, home.bottom() + 1 - MARGIN - TAB[1]))
+        self.tab.move(self.tab.x(), top)
+
+    def _tab_dropped(self) -> None:
+        self._tab_dragging = False
+        home = home_screen(self.edge) if self.edge else None
+        if home is None:
+            return
+        self.place = max(0.0, min(1.0, (self.tab.y() + TAB[1] / 2 - home.top()) / home.height()))
+        self.moved.emit(self.place)
 
     def _look(self) -> None:
         now = time.monotonic()
         point = pointer()
+        if not self._tab_dragging and now - self._tab_looked >= TAB_EVERY:
+            self._tab_looked = now
+            self._show_tab()
+        if self._dragging or self._tab_dragging:
+            return
         if self.isVisible() and not self._leaving:
             near = self.frameGeometry().adjusted(-24, -24, 24, 24)
             if near.contains(point) or at_edge(point, self.edge) is not None:
@@ -197,27 +403,61 @@ class EdgePanel(QWidget):
         if self.isVisible():
             return
         screen = at_edge(point, self.edge)
-        if screen is None:
+        top, bottom = self._zone(screen) if screen is not None else (0, -1)
+        if not top <= point.y() <= bottom:
             self._resting_since = None
             return
         if self._resting_since is None:
             self._resting_since = now
         elif now - self._resting_since >= DWELL and self.allowed():
             self._resting_since = None
-            self.slide_out(screen, point.y())
+            self.slide_out(screen)
 
-    def _places(self, screen: QRect, y: int) -> tuple[QPoint, QPoint]:
+    def _height(self, screen: QRect) -> int:
+        return min(max(self.height(), self.sizeHint().height()), screen.height() - 2 * MARGIN)
+
+    def _top(self, screen: QRect, height: int) -> int:
+        """Where its top goes on that screen, its middle at place - all of it on the screen."""
+        return round(self._middle(screen, height) - height / 2)
+
+    def _zone(self, screen: QRect) -> tuple[int, int]:
+        """Where along the edge resting brings it out: around the tab - an eighth of the screen's
+        height at least, so it is easy to hit."""
+        middle = self._middle(screen, TAB[1])
+        reach = max(TAB[1] + 40, screen.height() // 8)
+        return round(middle - reach / 2), round(middle + reach / 2)
+
+    def _places(self, screen: QRect) -> tuple[QPoint, QPoint]:
         """Where it rests, and where it slides from - just beyond the edge."""
-        height = self.sizeHint().height()
-        top = max(screen.top() + MARGIN, min(y - height // 2, screen.bottom() - height - MARGIN))
+        top = self._top(screen, self._height(screen))
         if self.edge == 'left':
             return QPoint(screen.left() + MARGIN, top), QPoint(screen.left() - WIDTH - 2, top)
         return QPoint(screen.right() - WIDTH - MARGIN + 1, top), QPoint(screen.right() + 2, top)
 
-    def slide_out(self, screen: QRect, y: int) -> None:
+    def _drag_to(self, top: int) -> None:
+        """Its handle dragged: up or down the edge, staying on the screen."""
+        screen = QGuiApplication.screenAt(self.frameGeometry().center())
+        if screen is None:
+            return
+        g = screen.geometry()
+        self._dragging = True
+        self._left_at = None
+        self.move(self.x(), max(g.top() + MARGIN, min(top, g.bottom() + 1 - self.height() - MARGIN)))
+
+    def _dropped(self) -> None:
+        self._dragging = False
+        screen = QGuiApplication.screenAt(self.frameGeometry().center())
+        if screen is None:
+            return
+        g = screen.geometry()
+        self.place = max(0.0, min(1.0, (self.y() + self.height() / 2 - g.top()) / g.height()))
+        self.moved.emit(self.place)
+
+    def slide_out(self, screen: QRect) -> None:
         self.showing.emit()
+        self.tab.hide()
         self.adjustSize()
-        rest, start = self._places(screen, y)
+        rest, start = self._places(screen)
         self._left_at = None
         self._leaving = False
         if not theme.motion_on():
@@ -238,14 +478,16 @@ class EdgePanel(QWidget):
         if not theme.motion_on() or screen is None:
             self.hide()
             self._leaving = False
+            self._show_tab()
             return
-        _, away = self._places(screen.geometry(), self.frameGeometry().center().y())
+        _, away = self._places(screen.geometry())
         self._slide(self.pos(), QPoint(away.x(), self.y()), 200, QEasingCurve.InCubic, then=self._gone)
 
     def _gone(self) -> None:
         self.hide()
         self.setWindowOpacity(1.0)
         self._leaving = False
+        self._show_tab()
 
     def _slide(self, start: QPoint, end: QPoint, ms: int, curve, then=None) -> None:
         if self._sliding is not None:

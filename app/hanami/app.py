@@ -153,6 +153,18 @@ class Settings:
     def panel_edge(self, edge: str) -> None:
         self._store.setValue('panel/edge', edge)
 
+    @property
+    def panel_place(self) -> float:
+        """Where along the edge the panel's middle sits, as a share of the screen's height."""
+        try:
+            return max(0.0, min(1.0, float(self._store.value('panel/place', 0.5))))
+        except (TypeError, ValueError):
+            return 0.5
+
+    @panel_place.setter
+    def panel_place(self, place: float) -> None:
+        self._store.setValue('panel/place', round(place, 4))
+
     def set_sound(self, on: bool, hotkey: str) -> None:
         self._store.setValue('sound/hotkey_on', 'true' if on else 'false')
         self._store.setValue('sound/hotkey', hotkey)
@@ -216,11 +228,13 @@ class Controller(QObject):
         self._make_tray()
         self._listen()
         self.sound_popup: SoundPopup | None = None
-        self.panel = EdgePanel(allowed=self._panel_allowed)
+        self.panel = EdgePanel(quiet=self._panel_quiet)
         self.panel.open_app.connect(self.open_app)
         self.panel.open_hanami.connect(self.show_window)
         self.panel.output_clicked.connect(self.choose_output)
         self.panel.showing.connect(self._fill_panel)
+        self.panel.moved.connect(lambda place: setattr(self.settings, 'panel_place', place))
+        self.panel.place = self.settings.panel_place
         self.panel.set_edge(self.settings.panel_edge)
         self._panel_icons: dict[str, tuple] = {}
         self.hotkeys = Hotkeys(self)
@@ -448,10 +462,10 @@ class Controller(QObject):
 
     # ------------------------------------------------------------------ the edge panel
 
-    def _panel_allowed(self) -> bool:
-        """Whether the panel may come out now: not over a game, nor anything else full screen, nor
-        while something is being dragged."""
-        return not theme.quiet_now() and not win32.fullscreen_in_front() and not win32.buttons_down()
+    def _panel_quiet(self) -> bool:
+        """Whether the panel, and its tab, keep away now: a game, or anything else full screen, is
+        in front."""
+        return theme.quiet_now() or win32.fullscreen_in_front()
 
     def _fill_panel(self) -> None:
         """The panel's apps - those on this PC, a dot by those running - and its sound switch."""

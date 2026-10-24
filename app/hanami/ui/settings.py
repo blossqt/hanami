@@ -428,8 +428,9 @@ class SettingsWindow(QWidget):
         layout.addWidget(frame)
         frame, box = _section('Edge panel')
         holder, self.panel_on = _switch('Slide out a panel at the edge of the screen',
-                                        'Rest the pointer at the middle of the edge. The panel holds the suite’s apps '
-                                        'and the sound switch, and stays away from games and anything full screen.',
+                                        'A little tab at the edge shows where it is: rest the pointer on it, or click '
+                                        'it. Drag the tab, or the panel’s handle, to move it. It holds the suite’s apps '
+                                        'and the sound switch, and keeps away from games and anything full screen.',
                                         bool(panel_edge))
         self.panel_on.toggled.connect(self._panel_edited)
         box.addWidget(holder)

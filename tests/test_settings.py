@@ -362,10 +362,12 @@ class PanelTests(_Controlled):
         self.panel.open_app.connect(lambda name: self.controller.open_app(name))
         self.panel.output_clicked.disconnect()
         self.panel.output_clicked.connect(lambda which: self.controller.choose_output(which))
+        self.controller.settings.panel_place = self.panel.place = 0.5      # the middle, whatever a test before left
         self.panel.set_edge('right')
 
     def tearDown(self):
         self.panel.set_edge('')
+        self.controller.settings._store.remove('panel/place')
         for patch in self._patches:
             patch.stop()
         super().tearDown()
@@ -417,6 +419,50 @@ class PanelTests(_Controlled):
         self.rest_at(s.right(), s.center().y(), 0.4)
         self.panel.sound.chosen.emit('headphones')
         self.assertEqual(self.opened[-1], 'headphones')
+
+    def test_the_tab_shows_where_it_is(self):
+        s, tab = self.screen, self.panel.tab
+        self.panel._show_tab()
+        self.assertTrue(tab.isVisible())
+        g = tab.frameGeometry()
+        self.assertEqual(g.right(), s.right(), 'at the edge')
+        self.assertAlmostEqual(g.center().y(), s.center().y(), delta=2, msg='in the middle, until moved')
+        tab.clicked.emit()
+        self.assertTrue(self.panel.isVisible(), 'clicked, the panel comes out')
+        self.assertFalse(tab.isVisible(), 'and the tab keeps out of its way')
+        self.panel.slide_away()
+        self.assertTrue(tab.isVisible(), 'back once the panel goes')
+        self.full_screen = True
+        self.panel._show_tab()
+        self.assertFalse(tab.isVisible(), 'not over anything full screen')
+        tab.clicked.emit()
+        self.assertFalse(self.panel.isVisible())
+        self.full_screen = False
+
+    def test_dragging_the_tab_moves_the_panel(self):
+        s, tab = self.screen, self.panel.tab
+        self.panel._show_tab()
+        tab.dragged.emit(s.top() + s.height() // 5)
+        tab.dropped.emit()
+        self.assertAlmostEqual(self.controller.settings.panel_place, 0.2, delta=0.02, msg='kept')
+        self.assertAlmostEqual(tab.frameGeometry().center().y(), s.top() + s.height() // 5, delta=2)
+        self.rest_at(s.right(), s.center().y(), 0.5)
+        self.assertFalse(self.panel.isVisible(), 'resting where it used to be does nothing')
+        self.rest_at(s.right(), s.top() + s.height() // 5, 0.5)
+        self.assertTrue(self.panel.isVisible(), 'beside the tab does')
+        self.assertLess(self.panel.frameGeometry().center().y(), s.center().y(), 'and it comes out up there')
+
+    def test_dragging_the_panels_handle_moves_it(self):
+        s = self.screen
+        self.rest_at(s.right(), s.center().y(), 0.4)
+        self.panel.handle.dragged.emit(s.bottom())                    # as far down as it goes
+        self.rest_at(s.center().x(), s.center().y(), 0.7)
+        self.assertTrue(self.panel.isVisible(), 'held out while it is dragged, wherever the pointer is')
+        self.assertEqual(self.panel.frameGeometry().bottom(), s.bottom() - self.panel_module.MARGIN, 'all on screen')
+        self.panel.handle.dropped.emit()
+        self.assertGreater(self.controller.settings.panel_place, 0.5)
+        self.rest_at(s.center().x(), s.center().y(), 0.7)
+        self.assertFalse(self.panel.isVisible(), 'and goes, once let go and left')
 
     def test_turned_off_or_moved_in_settings(self):
         window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY), 'right')
