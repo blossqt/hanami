@@ -5,9 +5,9 @@ until it is moved - the tab dragged up or down, or the handle along the panel's 
 along the edge its middle is, as a share of the screen's height). The tab keeps out of the way of
 games and anything else full screen (quiet), and of the panel itself while that is out.
 
-Only an edge with no screen beyond it counts - the pointer can rest there, and passing through to
-another screen never brings the panel out - and the pointer has to stay a moment (DWELL), with no
-button held, and not over a game or anything else full screen (quiet, as Hanami says). It slides
+The pointer need not be right against the edge: anywhere within NEAR of it, beside where the panel
+sits, will do. Only an edge with no screen beyond it counts - passing through to another screen
+never brings the panel out - and the pointer has to stay a moment (DWELL), with no button held, and not over a game or anything else full screen (quiet, as Hanami says). It slides
 away once the pointer has left it for a moment (LEAVE), and after a choice in it.
 """
 
@@ -29,6 +29,7 @@ PHOTO = str(Path(__file__).with_name('panel.jpg'))     # Yan Liu's blossom, on U
 WIDTH = 106
 ICON = 48
 MARGIN = 10             # between the panel and the screen's edge
+NEAR = 48               # px in from the screen's edge that count as at it
 DWELL = 0.3             # s the pointer rests at the edge before the panel comes out
 LEAVE = 0.45            # s after the pointer leaves it before it slides away
 WATCH_MS = 60
@@ -43,15 +44,16 @@ def pointer() -> QPoint:
 
 
 def at_edge(point: QPoint, edge: str) -> QRect | None:
-    """The screen whose edge the pointer rests on, with no screen beyond - or None."""
+    """The screen whose edge the pointer is at (within NEAR of it), with no screen beyond - or
+    None."""
     screen = QGuiApplication.screenAt(point)
     if screen is None:
         return None
     g = screen.geometry()
     if edge == 'right':
-        on, beyond = point.x() >= g.right() - 1, QPoint(g.right() + 2, point.y())
+        on, beyond = point.x() > g.right() - NEAR, QPoint(g.right() + 2, point.y())
     elif edge == 'left':
-        on, beyond = point.x() <= g.left() + 1, QPoint(g.left() - 2, point.y())
+        on, beyond = point.x() < g.left() + NEAR, QPoint(g.left() - 2, point.y())
     else:
         return None
     return g if on and QGuiApplication.screenAt(beyond) is None else None
@@ -423,11 +425,13 @@ class EdgePanel(QWidget):
         return round(self._middle(screen, height) - height / 2)
 
     def _zone(self, screen: QRect) -> tuple[int, int]:
-        """Where along the edge resting brings it out: around the tab - an eighth of the screen's
-        height at least, so it is easy to hit."""
-        middle = self._middle(screen, TAB[1])
-        reach = max(TAB[1] + 40, screen.height() // 8)
-        return round(middle - reach / 2), round(middle + reach / 2)
+        """Where along the edge resting brings it out: beside where the panel comes out, and
+        around the tab - a fifth of the screen's height at least, so it is easy to hit."""
+        height = self._height(screen)
+        top = self._top(screen, height)
+        tab = self._middle(screen, TAB[1])
+        reach = max(TAB[1] + 40, screen.height() // 5) / 2
+        return round(min(top, tab - reach)), round(max(top + height, tab + reach))
 
     def _places(self, screen: QRect) -> tuple[QPoint, QPoint]:
         """Where it rests, and where it slides from - just beyond the edge."""

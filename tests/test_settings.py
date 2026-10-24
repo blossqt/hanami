@@ -394,6 +394,13 @@ class PanelTests(_Controlled):
         self.rest_at(s.center().x(), s.center().y(), 0.7)
         self.assertFalse(self.panel.isVisible(), 'and goes once the pointer has left it')
 
+    def test_near_the_edge_will_do(self):
+        s = self.screen
+        self.rest_at(s.right() - self.panel_module.NEAR - 20, s.center().y(), 0.5)
+        self.assertFalse(self.panel.isVisible(), 'not out in the screen')
+        self.rest_at(s.right() - self.panel_module.NEAR + 10, s.center().y() + 150, 0.5)
+        self.assertTrue(self.panel.isVisible(), 'a little in from the edge, beside the panel')
+
     def test_not_at_the_ends_of_the_edge_nor_over_anything_full_screen(self):
         s = self.screen
         self.rest_at(s.right(), s.top() + 5, 0.5)
@@ -446,8 +453,8 @@ class PanelTests(_Controlled):
         tab.dropped.emit()
         self.assertAlmostEqual(self.controller.settings.panel_place, 0.2, delta=0.02, msg='kept')
         self.assertAlmostEqual(tab.frameGeometry().center().y(), s.top() + s.height() // 5, delta=2)
-        self.rest_at(s.right(), s.center().y(), 0.5)
-        self.assertFalse(self.panel.isVisible(), 'resting where it used to be does nothing')
+        self.rest_at(s.right(), s.bottom() - 20, 0.5)
+        self.assertFalse(self.panel.isVisible(), 'resting at the far end of the edge does nothing')
         self.rest_at(s.right(), s.top() + s.height() // 5, 0.5)
         self.assertTrue(self.panel.isVisible(), 'beside the tab does')
         self.assertLess(self.panel.frameGeometry().center().y(), s.center().y(), 'and it comes out up there')

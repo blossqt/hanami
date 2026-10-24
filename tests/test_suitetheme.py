@@ -458,6 +458,36 @@ class MotionTests(unittest.TestCase):
         except OSError:
             pass
 
+    def test_they_move_on_once_a_frame_on_the_fastest_screen(self):
+        from PySide6.QtCore import QVariantAnimation
+
+        class Screen:
+            def __init__(self, rate):
+                self.refreshRate = lambda: rate
+        with mock.patch.object(suitetheme.QGuiApplication, 'screens', lambda: [Screen(100.0), Screen(280.0)]):
+            self.assertEqual(suitetheme.frame_interval(), 3)
+        with mock.patch.object(suitetheme.QGuiApplication, 'screens', lambda: [Screen(59.94)]):
+            self.assertEqual(suitetheme.frame_interval(), 16, 'as Qt has it')
+
+        def ticks(ms):
+            animation = QVariantAnimation()
+            animation.setDuration(ms)
+            animation.setStartValue(0.0)
+            animation.setEndValue(1.0)
+            count = [0]
+            animation.valueChanged.connect(lambda _: count.__setitem__(0, count[0] + 1))
+            loop = QEventLoop()
+            animation.finished.connect(loop.quit)
+            animation.start()
+            loop.exec()
+            return count[0]
+        try:
+            with mock.patch.object(suitetheme, 'frame_interval', lambda: 4):
+                suitetheme._frame_rate()
+                self.assertGreater(ticks(400), 400 / 16 * 1.6, 'Qt really ticks faster than 60 a second')
+        finally:
+            suitetheme._frame_rate()
+
     def test_a_windows_parts_rise_into_place_one_after_another(self):
         window = QWidget()
         layout = QVBoxLayout(window)
