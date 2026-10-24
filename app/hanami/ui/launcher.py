@@ -55,6 +55,7 @@ class CardState:
     busy: str = ''                  # what an install under way is doing
     done: int = 0
     total: int = 0
+    starting: bool = False          # started a moment ago, and not up yet
 
 
 _BUSY = {'download': 'Downloading', 'unpack': 'Unpacking', 'check': 'Checking it starts',
@@ -186,7 +187,9 @@ class AppCard(QFrame):
             self.progress.setRange(0, 1000 if fraction else 0)
             if fraction:
                 self.progress.setValue(int(1000 * s.done / s.total))
-        self.open.setText('Install' if s.exe is None else 'Open' if s.running else 'Start')
+        self.open.setText('Install' if s.exe is None else 'Open' if s.running
+                          else 'Starting…' if s.starting else 'Start')
+        self.open.setEnabled(not s.starting)
         self.open.setVisible(not busy)
         self.update.setText(f'Update to {s.latest}')
         self.update.setVisible(s.update and not busy)

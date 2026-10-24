@@ -15,6 +15,7 @@ import shutil
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QSettings, QTimer, QUrl, Signal
@@ -35,6 +36,7 @@ DEV = os.environ.get('HANAMI_DEV') == '1'
 CHECK_EVERY = 12 * 3600          # how often Hanami asks GitHub for newer releases
 CHECK_AGAIN = 15 * 60            # opening the window asks again once this has passed
 QUIT_WAIT = 20                   # seconds an app gets to quit before an update
+STARTING_FOR = 20                # longest an app's card says "Starting…", for one that never comes up
 
 
 class Settings:
@@ -153,6 +155,7 @@ class Controller(QObject):
         self.window: LauncherWindow | None = None
         self.settings_window: SettingsWindow | None = None
         self._running: set[str] = set()
+        self._starting: dict[str, float] = {}     # app: when its card stops saying "Starting…" anyway
         self.latest: dict[str, releases.Release] = {}
         self.problems: dict[str, str] = {}
         self.jobs: dict[str, _Job] = {}
@@ -209,9 +212,16 @@ class Controller(QObject):
         for key, value in installer.clean_environment().items():
             environment.insert(key, value)
         process.setProcessEnvironment(environment)
-        started, _pid = process.startDetached()
+        result = process.startDetached()
+        # PySide6 6.11 answers only whether it started, though its stubs still say (started, pid).
+        started = result[0] if isinstance(result, tuple) else bool(result)
         if not started:
             self.tray.showMessage('Hanami', f'{name} would not start.', icons.app_icon(), 5000)
+        elif not self.is_running(name):
+            # Its card says so until it is seen running (_refresh), or for STARTING_FOR at most.
+            self._starting[name] = time.monotonic() + STARTING_FOR
+            self._update_window()
+            QTimer.singleShot(STARTING_FOR * 1000 + 100, self._refresh)
         QTimer.singleShot(1500, self._refresh)
 
     def quit_app(self, name: str) -> None:
@@ -223,7 +233,10 @@ class Controller(QObject):
         self._refresh()
         for name in self.settings.start_with:
             if not self.is_running(name):
-                self.open_app(name, startup=True)
+                try:
+                    self.open_app(name, startup=True)
+                except Exception:                   # one that can't be started keeps none of the rest from it
+                    traceback.print_exc()
 
     def _refresh(self) -> None:
         programs = win32.running_programs()
@@ -234,6 +247,8 @@ class Controller(QObject):
                 running.add(app.name)
         changed = running != self._running
         self._running = running
+        now = time.monotonic()
+        self._starting = {n: until for n, until in self._starting.items() if until > now and not self.is_running(n)}
         if changed:
             self._changed()
             self._auto_update()
@@ -630,7 +645,7 @@ class Controller(QObject):
                          latest=release.version if release and release.asset else '',
                          update=self.update_available(name), problem=self.problems.get(name, ''),
                          busy=job.phase if job else '', done=job.done if job else 0,
-                         total=job.total if job else 0)
+                         total=job.total if job else 0, starting=name in self._starting)
 
     def _update_window(self) -> None:
         if self.window is None:

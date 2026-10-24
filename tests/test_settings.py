@@ -60,6 +60,76 @@ class StartWithTests(unittest.TestCase):
             for name, original in originals.items():
                 setattr(hanami.Controller, name, original)
 
+    def test_a_card_says_starting_until_the_app_is_up(self):
+        from hanami.ui.launcher import AppCard, CardState
+        card = AppCard(hanami.catalog.BY_NAME['Dropshift'])
+        here = Path(sys.executable)
+        card.show_state(CardState(exe=here, starting=True))
+        self.assertEqual((card.open.text(), card.open.isEnabled()), ('Starting…', False))
+        card.show_state(CardState(exe=here, running=True))
+        self.assertEqual((card.open.text(), card.open.isEnabled()), ('Open', True))
+        card.show_state(CardState(exe=here))
+        self.assertEqual(card.open.text(), 'Start')
+
+    def test_every_chosen_app_is_started_however_qt_answers(self):
+        """PySide6 6.11's startDetached answers a bare bool, which Hanami once took for a pair - and
+        stopped, with a TypeError, after the first app it started. Nothing is started here: the
+        process is a stand-in that writes down what it was asked."""
+        settings = hanami.Settings()
+        settings.start_with = ['Keytap', 'Dropshift', 'Homework Hub']
+        for name in settings.start_with:
+            settings.set_exe(name, sys.executable)                     # any file that is there
+        asked = []
+
+        class Process:
+            answer = True
+
+            def setProgram(self, program):
+                self.args = []
+
+            def setArguments(self, args):
+                self.args = args
+
+            def setWorkingDirectory(self, folder):
+                pass
+
+            def setProcessEnvironment(self, environment):
+                pass
+
+            def startDetached(self):
+                asked.append(self.args)
+                if Process.answer == 'fail' and len(asked) == 1:
+                    raise OSError('could not start')
+                return Process.answer
+
+        stand_ins = {'show_window': lambda self: None, 'check_releases': lambda self: None,
+                     'is_running': lambda self, name: False}
+        originals = {name: getattr(hanami.Controller, name) for name in stand_ins}
+        real_process = hanami.QProcess
+        hanami.QProcess = Process
+        for name, stand_in in stand_ins.items():
+            setattr(hanami.Controller, name, stand_in)
+        dev, hanami.DEV = hanami.DEV, True          # so it starts nothing by itself, later
+        try:
+            controller = hanami.Controller(startup=False)
+            for answer in (True, (True, 4321), 'fail'):
+                Process.answer, asked[:] = answer, []
+                controller._start_chosen()
+                self.assertEqual(asked, [['--startup'], [], []], f'all three, answered {answer!r}')
+            self.assertTrue(controller.card_state('Dropshift').starting, 'its card says "Starting…"')
+            hanami.Controller.is_running = lambda self, name: True             # and now it is up
+            controller._refresh()
+            self.assertFalse(controller.card_state('Dropshift').starting)
+            controller._server.close()
+        finally:
+            hanami.DEV = dev
+            hanami.QProcess = real_process
+            for name, original in originals.items():
+                setattr(hanami.Controller, name, original)
+            settings.start_with = []
+            for name in ('Keytap', 'Dropshift', 'Homework Hub'):
+                settings.set_exe(name, '')
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
