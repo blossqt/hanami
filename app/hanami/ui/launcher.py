@@ -15,6 +15,7 @@ from .. import __version__, win32
 from ..catalog import SUITE
 from . import icons, theme
 from .settings import glyph_font
+from .sound import SoundToggle
 
 
 def _label(text: str, size: float, weight=QFont.Normal, role: str = '') -> QLabel:
@@ -214,6 +215,7 @@ class LauncherWindow(QWidget):
     show_page = Signal(str)
     exe_chosen = Signal(str, str)
     settings_clicked = Signal()
+    output_clicked = Signal(str)        # 'speakers' or 'headphones' 
 
     def __init__(self):
         super().__init__()
@@ -232,6 +234,9 @@ class LauncherWindow(QWidget):
         logo.setPixmap(icons.render_app_icon(40))
         top.addWidget(logo, 0, Qt.AlignVCenter)
         top.addWidget(_label('Hanami', 17, QFont.DemiBold), 1, Qt.AlignVCenter)
+        self.sound = SoundToggle()
+        self.sound.chosen.connect(self.output_clicked)
+        top.addWidget(self.sound, 0, Qt.AlignVCenter)
         self.settings = QToolButton()
         self.settings.setObjectName('settingsButton')
         self.settings.setText('')

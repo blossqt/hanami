@@ -12,8 +12,9 @@ import math
 from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import (QColor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
                            QRadialGradient)
-from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QCheckBox, QFrame, QGridLayout, QHBoxLayout,
-                               QKeySequenceEdit, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QCheckBox, QComboBox, QFrame, QGridLayout,
+                               QHBoxLayout, QKeySequenceEdit, QLabel, QPushButton, QStackedWidget, QVBoxLayout,
+                               QWidget)
 
 from .. import __version__
 from ..catalog import SUITE
@@ -336,7 +337,8 @@ class _LookTile(QAbstractButton):
 class SettingsWindow(QWidget):
     startup_changed = Signal(bool, list)
     updates_changed = Signal(bool, bool, bool)      # look by itself, tell me, install by itself
-    sound_changed = Signal(bool, str, list)         # the hotkey on, the hotkey, the outputs it switches between
+    sound_changed = Signal(bool, str)               # the hotkey on, the hotkey
+    output_chosen = Signal(str, str, str)           # 'speakers' or 'headphones', the output's id ('' for none), its name
     check_now = Signal()
     show_page = Signal(str)
     open_url = Signal(str)
@@ -345,7 +347,7 @@ class SettingsWindow(QWidget):
              ('', 'About')]
 
     def __init__(self, start_with: list[str], starts_with_windows: bool, updates: tuple[bool, bool, bool],
-                 sound: tuple[bool, str, list] = (True, '', [])):
+                 sound: tuple[bool, str] = (True, '')):
         super().__init__()
         self.setWindowTitle('Hanami settings')
         self.setWindowIcon(icons.app_icon())
@@ -512,10 +514,28 @@ class SettingsWindow(QWidget):
         layout.addStretch(1)
         return page
 
-    def _sound(self, on: bool, hotkey: str, chosen: list) -> QWidget:
+    def _sound(self, on: bool, hotkey: str) -> QWidget:
         page, layout = self._page('Sound', '')
         frame, box = _section('Sound output')
-        holder, self.sound_on = _switch('Switch the sound output with a hotkey', 'A pop-up names the output it went '
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(8)
+        self.output_choices: dict[str, QComboBox] = {}
+        for row, (which, title) in enumerate((('speakers', 'Speakers:'), ('headphones', 'Headphones:'))):
+            combo = QComboBox()
+            combo.setMinimumWidth(320)
+            combo.setCursor(Qt.PointingHandCursor)
+            combo.currentIndexChanged.connect(lambda _, w=which: self._output_edited(w))
+            self.output_choices[which] = combo
+            grid.addWidget(_label(title, 9.5), row, 0)
+            grid.addWidget(combo, row, 1)
+        grid.setColumnStretch(2, 1)
+        box.addLayout(grid)
+        box.addWidget(_label('The switch at the top of Hanami’s window goes between these two.', 8.5, role='dim',
+                             wrap=True))
+        box.addSpacing(6)
+        holder, self.sound_on = _switch('Switch between them with a hotkey', 'A pop-up names the output it went '
                                         'to.', on)
         self.sound_on.toggled.connect(self._sound_edited)
         box.addWidget(holder)
@@ -533,37 +553,25 @@ class SettingsWindow(QWidget):
         self.sound_problem = _label('', 9, role='error', wrap=True)
         self.sound_problem.hide()
         box.addWidget(self.sound_problem)
-        box.addSpacing(4)
-        box.addWidget(_label('Switch between:', 9, role='dim'))
-        self.output_grid = QGridLayout()
-        self.output_grid.setContentsMargins(0, 0, 0, 0)
-        self.output_grid.setHorizontalSpacing(24)
-        self.output_grid.setVerticalSpacing(6)
-        box.addLayout(self.output_grid)
-        self.outputs: dict[str, QCheckBox] = {}
-        self._chosen_away: list[str] = []
-        box.addWidget(_label('With fewer than two ticked, it goes through all of them.', 8.5, role='dim', wrap=True))
-        self.show_outputs([], chosen)
         layout.addWidget(frame)
         layout.addStretch(1)
         return page
 
-    def show_outputs(self, outputs: list, chosen: list) -> None:
-        """The sound outputs plugged in now, ticked as chosen; those chosen but not plugged in stay so."""
-        for check in self.outputs.values():
-            self.output_grid.removeWidget(check)
-            check.deleteLater()
-        self.outputs = {}
-        present = {output.id for output in outputs}
-        self._chosen_away = [i for i in chosen if i not in present]
-        for index, output in enumerate(outputs):
-            check = QCheckBox(output.name)
-            check.setChecked(output.id in chosen)
-            check.setCursor(Qt.PointingHandCursor)
-            check.toggled.connect(self._sound_edited)
-            self.outputs[output.id] = check
-            self.output_grid.addWidget(check, index // 2, index % 2)
-        self.output_grid.setColumnStretch(2, 1)
+    def show_outputs(self, outputs: list, chosen: dict) -> None:
+        """The sound outputs plugged in now, with the ones chosen as speakers and headphones
+        ({'speakers': (id, name) or None, ...}) - one chosen but not plugged in is still there."""
+        for which, combo in self.output_choices.items():
+            picked = chosen.get(which)
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem('None', ('', ''))
+            for output in outputs:
+                combo.addItem(output.name, (output.id, output.name))
+            if picked and picked[0] not in {output.id for output in outputs}:
+                combo.addItem(f'{picked[1]} (not connected)', tuple(picked))
+            index = next((i for i in range(combo.count()) if picked and combo.itemData(i)[0] == picked[0]), 0)
+            combo.setCurrentIndex(index)
+            combo.blockSignals(False)
 
     def show_sound_problem(self, problem: str) -> None:
         self.sound_problem.setText(problem)
@@ -651,8 +659,14 @@ class SettingsWindow(QWidget):
     def _sound_edited(self, *_) -> None:
         keys = self.sound_key.keySequence()
         hotkey = keys.toString(QKeySequence.PortableText) if not keys.isEmpty() else ''
-        chosen = self._chosen_away + [i for i, check in self.outputs.items() if check.isChecked()]
-        self.sound_changed.emit(self.sound_on.isChecked(), hotkey, chosen)
+        self.sound_changed.emit(self.sound_on.isChecked(), hotkey)
+
+    def _output_edited(self, which: str) -> None:
+        combo = self.output_choices[which]
+        if combo.signalsBlocked():
+            return
+        output_id, name = combo.currentData() or ('', '')
+        self.output_chosen.emit(which, output_id, name)
 
     def _updates_edited(self, *_) -> None:
         self.updates_changed.emit(self.check.isChecked(), self.notify.isChecked(), self.auto.isChecked())

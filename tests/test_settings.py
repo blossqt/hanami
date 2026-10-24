@@ -215,19 +215,25 @@ class GameTests(_Controlled):
 
 
 class SoundTests(_Controlled):
+    """The speakers and the headphones: chosen in Settings, switched between from the main window
+    and with the hotkey. Windows' outputs are stand-ins - the real ones are never changed."""
+
     def setUp(self):
         super().setUp()
+        from unittest import mock
         from hanami import audio
         self.audio = audio
-        self.outputs = [audio.Output('a', 'Speakers (EDIFIER M230)'), audio.Output('b', 'Headphones (Protocol Max)'),
-                        audio.Output('c', 'TYPEC (NVIDIA High Definition Audio)')]
-        self.now = 'a'
-        from unittest import mock
+        self.outputs = [audio.Output('nv', 'Speakers (NVIDIA Broadcast)'), audio.Output('hp', 'Headphones (Protocol Max)'),
+                        audio.Output('tc', 'TYPEC (NVIDIA High Definition Audio)'),
+                        audio.Output('ed', 'Speakers (EDIFIER M230)')]
+        self.now = 'ed'
         self._patches = [mock.patch.object(audio, 'outputs', lambda: list(self.outputs)),
                          mock.patch.object(audio, 'current', lambda: self.now),
                          mock.patch.object(audio, 'choose', self._choose)]
         for patch in self._patches:
             patch.start()
+        self.controller.show_settings = lambda page='': self.asked_settings.append(page)
+        self.asked_settings = []
 
     def _choose(self, output_id):
         self.now = output_id
@@ -237,42 +243,77 @@ class SoundTests(_Controlled):
             patch.stop()
         if self.controller.sound_popup is not None:
             self.controller.sound_popup.hide()
-        self.controller.settings.set_sound(True, hanami.SOUND_HOTKEY, [])
+        if self.controller.window is not None:
+            self.controller.window.close()
+        s = self.controller.settings
+        s.set_sound(True, hanami.SOUND_HOTKEY)
+        for which in ('speakers', 'headphones'):
+            s.set_output(which, '', '')
+        s._store.remove('sound/guessed')
         super().tearDown()
 
-    def test_the_hotkey_goes_through_the_chosen_outputs(self):
-        self.controller.settings.set_sound(True, 'Ctrl+Alt+S', ['a', 'b'])
+    def test_guessed_the_first_time_from_their_names(self):
+        chosen = self.controller.outputs_chosen()
+        self.assertEqual(chosen, {'speakers': ('ed', 'Speakers (EDIFIER M230)'),
+                                  'headphones': ('hp', 'Headphones (Protocol Max)')},
+                         'headphones by name; speakers what sound goes to now')
+        self.now = 'nv'
+        self.assertEqual(self.controller.outputs_chosen()['speakers'][0], 'ed', 'and kept, not guessed again')
+
+    def test_the_hotkey_goes_between_the_two(self):
         self.controller.switch_sound()
-        self.assertEqual(self.now, 'b')
+        self.assertEqual(self.now, 'hp')
         self.assertEqual(self.controller.sound_popup.name, 'Headphones (Protocol Max)', 'and says where')
         self.controller.switch_sound()
-        self.assertEqual(self.now, 'a', 'round again, past the one not chosen')
-
-    def test_all_of_them_with_fewer_than_two_chosen(self):
-        self.controller.settings.set_sound(True, 'Ctrl+Alt+S', ['b'])
-        for expected in ('b', 'c', 'a'):
-            self.controller.switch_sound()
-            self.assertEqual(self.now, expected)
-
-    def test_with_one_output_there_is_nothing_to_switch_to(self):
-        self.outputs = self.outputs[:1]
+        self.assertEqual(self.now, 'ed', 'back, past the two not chosen')
+        self.now = 'tc'                                     # changed elsewhere, to neither
         self.controller.switch_sound()
-        self.assertEqual(self.now, 'a')
-        self.assertEqual(self.controller.sound_popup.name, 'There is no other sound output')
+        self.assertEqual(self.now, 'hp')
 
-    def test_the_sound_page_keeps_what_is_chosen(self):
-        self.controller.show_settings('Sound')
-        window = self.controller.settings_window
-        self.assertEqual(list(window.outputs), ['a', 'b', 'c'])
-        window.outputs['b'].setChecked(True)
-        window.outputs['c'].setChecked(True)
-        self.assertEqual(self.controller.settings.sound_outputs, ['b', 'c'])
-        self.outputs = self.outputs[:2]                                  # the TYPEC screen unplugged
-        self.controller.show_settings('Sound')
-        window.outputs['a'].setChecked(True)
-        self.assertEqual(sorted(self.controller.settings.sound_outputs), ['a', 'b', 'c'], 'kept for when it is back')
-        window.sound_on.setChecked(False)
-        self.assertFalse(self.controller.settings.sound_hotkey_on)
+    def test_headphones_unplugged(self):
+        self.controller.outputs_chosen()
+        self.outputs = [o for o in self.outputs if o.id != 'hp']
+        self.controller.switch_sound()
+        self.assertEqual(self.now, 'ed', 'nothing changed')
+        self.assertEqual(self.controller.sound_popup.name, 'Headphones (Protocol Max) isn’t connected')
+
+    def test_the_switch_on_the_main_window(self):
+        from hanami.ui.launcher import LauncherWindow
+        controller = self.controller
+        controller.window = LauncherWindow()
+        controller.window.output_clicked.connect(controller.choose_output)
+        controller.window.show()
+        controller._update_sound()
+        toggle = controller.window.sound
+        self.assertEqual(toggle.side, 'speakers', 'lit where the sound goes now')
+        self.assertIn('Headphones (Protocol Max)', toggle.toolTip())
+        toggle.chosen.emit('headphones')                    # clicked
+        self.assertEqual((self.now, toggle.side), ('hp', 'headphones'))
+        self.assertIsNone(controller.sound_popup, 'no pop-up: the window shows it')
+        self.now = 'tc'                                     # changed in Windows' own settings
+        controller._refresh()
+        self.assertIsNone(toggle.side, 'neither of the two')
+
+    def test_without_headphones_the_switch_asks_for_them(self):
+        self.outputs = [o for o in self.outputs if o.id != 'hp']
+        self.controller.choose_output('headphones')
+        self.assertEqual(self.asked_settings, ['Sound'])
+        self.assertEqual(self.now, 'ed')
+
+    def test_chosen_on_the_sound_page(self):
+        window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY))
+        window.output_chosen.connect(self.controller._output_chosen)
+        window.show_outputs(self.outputs, self.controller.outputs_chosen())
+        speakers = window.output_choices['speakers']
+        self.assertEqual(speakers.currentText(), 'Speakers (EDIFIER M230)')
+        speakers.setCurrentIndex(speakers.findText('Speakers (NVIDIA Broadcast)'))
+        self.assertEqual(self.controller.settings.output('speakers'), ('nv', 'Speakers (NVIDIA Broadcast)'))
+        self.outputs = [o for o in self.outputs if o.id != 'hp']        # the headphones unplugged
+        window.show_outputs(self.outputs, self.controller.outputs_chosen())
+        self.assertEqual(window.output_choices['headphones'].currentText(), 'Headphones (Protocol Max) (not connected)',
+                         'still chosen, for when they are back')
+        window.output_choices['headphones'].setCurrentIndex(0)
+        self.assertIsNone(self.controller.settings.output('headphones'), 'None')
         window.close()
 
     def test_a_hotkey_that_cant_be_had_says_so(self):
@@ -280,8 +321,8 @@ class SoundTests(_Controlled):
         self.assertEqual(normalize('alt+ctrl+s'), 'Ctrl+Alt+S')
         with self.assertRaises(HotkeyError):
             parse('S')
-        self.controller.show_settings('Sound')
-        self.controller._sound_changed(True, 'S', [])
+        self.controller.settings_window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY))
+        self.controller._sound_changed(True, 'S')
         self.assertTrue(self.controller.settings_window.sound_problem.text())
         self.assertEqual(self.controller.settings.sound_hotkey, hanami.SOUND_HOTKEY, 'the old one is kept')
         self.controller.settings_window.close()

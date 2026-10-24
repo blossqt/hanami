@@ -31,7 +31,7 @@ from .hotkeys import Hotkeys, HotkeyError, normalize
 from .ui import icons, theme
 from .ui.launcher import CardState, LauncherWindow
 from .ui.settings import SettingsWindow
-from .ui.sound import SoundPopup
+from .ui.sound import HEADPHONES, SPEAKER, SoundPopup, sounds_like_headphones
 
 SERVER_NAME = os.environ.get('HANAMI_INSTANCE') or f'hanami-{os.environ.get("USERNAME", "user")}'
 APP_ID = 'Suite.Hanami'
@@ -127,19 +127,23 @@ class Settings:
     def sound_hotkey(self) -> str:
         return str(self._store.value('sound/hotkey', SOUND_HOTKEY) or '')
 
-    @property
-    def sound_outputs(self) -> list[str]:
-        """The outputs the hotkey switches between, by Windows' ids for them."""
+    def output(self, which: str) -> tuple[str, str] | None:
+        """The output chosen as the speakers or the headphones: (Windows' id for it, its name)."""
         try:
-            ids = json.loads(str(self._store.value('sound/outputs', '[]')))
+            chosen = json.loads(str(self._store.value(f'sound/{which}', 'null')))
         except ValueError:
-            return []
-        return [i for i in ids if isinstance(i, str)] if isinstance(ids, list) else []
+            return None
+        if isinstance(chosen, list) and len(chosen) == 2 and all(isinstance(part, str) for part in chosen) \
+                and chosen[0]:
+            return chosen[0], chosen[1]
+        return None
 
-    def set_sound(self, on: bool, hotkey: str, outputs: list[str]) -> None:
+    def set_output(self, which: str, output_id: str, name: str) -> None:
+        self._store.setValue(f'sound/{which}', json.dumps([output_id, name] if output_id else None))
+
+    def set_sound(self, on: bool, hotkey: str) -> None:
         self._store.setValue('sound/hotkey_on', 'true' if on else 'false')
         self._store.setValue('sound/hotkey', hotkey)
-        self._store.setValue('sound/outputs', json.dumps(outputs))
 
     @property
     def set_up(self) -> bool:
@@ -288,6 +292,7 @@ class Controller(QObject):
             self._auto_update()
         elif self.window is not None and self.window.isVisible():
             self._update_window()
+        self._update_sound()                    # the output may have changed elsewhere (Windows' own settings)
 
     def _changed(self) -> None:
         self._update_tray()
@@ -330,10 +335,70 @@ class Controller(QObject):
         if action == 'sound':
             self.switch_sound()
 
-    def switch_sound(self) -> None:
-        """Send the sound to the next output, and say which."""
+    def outputs_chosen(self, present: list | None = None) -> dict:
+        """The speakers and the headphones, as chosen in Settings - or, the first time, as their
+        names suggest: headphones by name, speakers the output sound goes to now (or the first
+        other one). A guess is kept, so it stays put until changed. {'speakers': (id, name), ...}."""
+        s = self.settings
+        chosen = {which: s.output(which) for which in ('speakers', 'headphones')}
+        if all(chosen.values()) or s._flag('sound/guessed', False):
+            return chosen
         try:
-            output = audio.next_output(self.settings.sound_outputs)
+            present = audio.outputs() if present is None else present
+            now = audio.current()
+        except OSError:
+            return chosen
+        phones = next((o for o in present if sounds_like_headphones(o.name)), None)
+        if chosen['headphones'] is None and phones is not None:
+            chosen['headphones'] = (phones.id, phones.name)
+        if chosen['speakers'] is None:
+            others = [o for o in present if not chosen['headphones'] or o.id != chosen['headphones'][0]]
+            speakers = next((o for o in others if o.id == now), None) or next(iter(others), None)
+            if speakers is not None:
+                chosen['speakers'] = (speakers.id, speakers.name)
+        if chosen['speakers'] and chosen['headphones']:
+            for which, (output_id, name) in chosen.items():
+                s.set_output(which, output_id, name)
+            s._store.setValue('sound/guessed', 'true')
+        return chosen
+
+    def choose_output(self, which: str, say: bool = False) -> None:
+        """Send the sound to the speakers or the headphones (opening Settings to choose them if
+        they aren't yet), and show where it went."""
+        picked = self.outputs_chosen().get(which)
+        if picked is None:
+            self.show_settings('Sound')
+            return
+        try:
+            present = {o.id for o in audio.outputs()}
+            if picked[0] in present:
+                audio.choose(picked[0])
+                said = picked[1]
+            else:
+                said = f'{picked[1]} isn’t connected'
+                say = True
+        except OSError:
+            traceback.print_exc()
+            said, say = 'The sound output couldn’t be changed', True
+        if say:
+            if self.sound_popup is None:
+                self.sound_popup = SoundPopup()
+            self.sound_popup.say(said, HEADPHONES if which == 'headphones' else SPEAKER)
+        self._update_sound()
+
+    def switch_sound(self) -> None:
+        """The hotkey: from the speakers to the headphones, or back - or, without both chosen,
+        to the next output there is. It says where the sound went."""
+        chosen = self.outputs_chosen()
+        if chosen['speakers'] and chosen['headphones']:
+            try:
+                now = audio.current()
+            except OSError:
+                now = ''
+            self.choose_output('speakers' if now == chosen['headphones'][0] else 'headphones', say=True)
+            return
+        try:
+            output = audio.next_output([])
             if output is not None:
                 audio.choose(output.id)
         except OSError:
@@ -344,14 +409,34 @@ class Controller(QObject):
         if self.sound_popup is None:
             self.sound_popup = SoundPopup()
         self.sound_popup.say(said)
+        self._update_sound()
 
-    def _sound_changed(self, on: bool, hotkey: str, outputs: list[str]) -> None:
+    def _update_sound(self) -> None:
+        """The switch at the top of Hanami's window: lit on the speakers or the headphones, as the
+        sound goes to one of them now."""
+        if self.window is None or not self.window.isVisible():
+            return
+        chosen = self.outputs_chosen()
+        try:
+            now = audio.current()
+        except OSError:
+            now = ''
+        side = next((which for which, picked in chosen.items() if picked and picked[0] == now), None)
+        names = {which: picked[1] if picked else 'not chosen' for which, picked in chosen.items()}
+        self.window.sound.show_output(side, f'Speakers: {names["speakers"]}\nHeadphones: {names["headphones"]}')
+
+    def _output_chosen(self, which: str, output_id: str, name: str) -> None:
+        self.settings.set_output(which, output_id, name)
+        self.settings._store.setValue('sound/guessed', 'true')          # chosen: no guessing from now on
+        self._update_sound()
+
+    def _sound_changed(self, on: bool, hotkey: str) -> None:
         try:
             hotkey = normalize(hotkey) if hotkey else ''
         except HotkeyError as error:
             self.settings_window.show_sound_problem(str(error))
             return
-        self.settings.set_sound(on, hotkey, outputs)
+        self.settings.set_sound(on, hotkey)
         self.sound_problem = self._register_hotkeys()
         if self.settings_window is not None:
             self.settings_window.show_sound_problem(self.sound_problem)
@@ -704,10 +789,12 @@ class Controller(QObject):
             self.window.uninstall_app.connect(self.uninstall_app)
             self.window.show_page.connect(self.show_page)
             self.window.exe_chosen.connect(self._exe_chosen)
+            self.window.output_clicked.connect(self.choose_output)
         self._update_window()
         self.window.show()
         self.window.raise_()
         self.window.activateWindow()
+        self._update_sound()
         if self.settings.check_updates and self._checked_at and time.monotonic() - self._checked_at > CHECK_AGAIN:
             self.check_releases()
 
@@ -716,9 +803,10 @@ class Controller(QObject):
             s = self.settings
             self.settings_window = SettingsWindow(s.start_with, win32.starts_with_windows(),
                                                   (s.check_updates, s.notify_updates, s.auto_update),
-                                                  (s.sound_hotkey_on, s.sound_hotkey, s.sound_outputs))
+                                                  (s.sound_hotkey_on, s.sound_hotkey))
             self.settings_window.startup_changed.connect(self._startup_changed)
             self.settings_window.sound_changed.connect(self._sound_changed)
+            self.settings_window.output_chosen.connect(self._output_chosen)
             self.settings_window.updates_changed.connect(self._updates_changed)
             self.settings_window.check_now.connect(self.check_releases)
             self.settings_window.show_page.connect(self.show_page)
@@ -729,7 +817,7 @@ class Controller(QObject):
             outputs = audio.outputs()
         except OSError:
             outputs = []
-        self.settings_window.show_outputs(outputs, self.settings.sound_outputs)
+        self.settings_window.show_outputs(outputs, self.outputs_chosen(outputs))
         self.settings_window.show_sound_problem(self.sound_problem)
         self._show_checked()
         self.settings_window.show()
