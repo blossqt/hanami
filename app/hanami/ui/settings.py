@@ -1,5 +1,5 @@
 """Hanami's settings: starting with Windows, the suite's appearance (light or dark, its glass,
-its animations), updates, and about Hanami.
+its animations), keeping quiet for games, the sound-output hotkey, updates, and about Hanami.
 
 The appearance is the whole suite's: what is chosen here is kept for every suite app
 (suitetheme.set_mode, set_look, set_motion), and each one running takes it within seconds.
@@ -10,9 +10,10 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
-from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                               QPushButton, QStackedWidget, QVBoxLayout, QWidget)
+from PySide6.QtGui import (QColor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
+                           QRadialGradient)
+from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QCheckBox, QFrame, QGridLayout, QHBoxLayout,
+                               QKeySequenceEdit, QLabel, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import __version__
 from ..catalog import SUITE
@@ -335,13 +336,16 @@ class _LookTile(QAbstractButton):
 class SettingsWindow(QWidget):
     startup_changed = Signal(bool, list)
     updates_changed = Signal(bool, bool, bool)      # look by itself, tell me, install by itself
+    sound_changed = Signal(bool, str, list)         # the hotkey on, the hotkey, the outputs it switches between
     check_now = Signal()
     show_page = Signal(str)
     open_url = Signal(str)
 
-    PAGES = [('', 'General'), ('', 'Appearance'), ('', 'Updates'), ('', 'About')]
+    PAGES = [('', 'General'), ('', 'Appearance'), ('', 'Games'), ('', 'Sound'), ('', 'Updates'),
+             ('', 'About')]
 
-    def __init__(self, start_with: list[str], starts_with_windows: bool, updates: tuple[bool, bool, bool]):
+    def __init__(self, start_with: list[str], starts_with_windows: bool, updates: tuple[bool, bool, bool],
+                 sound: tuple[bool, str, list] = (True, '', [])):
         super().__init__()
         self.setWindowTitle('Hanami settings')
         self.setWindowIcon(icons.app_icon())
@@ -368,6 +372,8 @@ class SettingsWindow(QWidget):
         self.pages = QStackedWidget()
         self.pages.addWidget(self._general(start_with, starts_with_windows))
         self.pages.addWidget(self._appearance())
+        self.pages.addWidget(self._games())
+        self.pages.addWidget(self._sound(*sound))
         self.pages.addWidget(self._updates(*updates))
         self.pages.addWidget(self._about())
         self.nav.chosen.connect(self.pages.setCurrentIndex)
@@ -474,6 +480,95 @@ class SettingsWindow(QWidget):
         layout.addStretch(1)
         return page
 
+    def _games(self) -> QWidget:
+        page, layout = self._page('Games', '')
+        frame, box = _section('While a full-screen game is in front')
+        holder, self.game_quiet = _switch('Keep the suite quiet', 'Notifications wait until you leave the game, and '
+                                          'the glass stops updating.', theme.game_quiet_chosen())
+        self.game_quiet.toggled.connect(self._game_edited)
+        box.addWidget(holder)
+        box.addWidget(_label('Grabbit’s downloads:', 9, role='dim'))
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        self.game_downloads = QButtonGroup(self)
+        self.download_buttons: dict[str, QPushButton] = {}
+        for name, title in theme.GAME_DOWNLOADS.items():
+            button = QPushButton(title)
+            button.setCheckable(True)
+            button.setChecked(theme.game_downloads() == name)
+            button.setCursor(Qt.PointingHandCursor)
+            button.clicked.connect(lambda _, n=name: theme.set_game_downloads(n))
+            self.game_downloads.addButton(button)
+            self.download_buttons[name] = button
+            row.addWidget(button)
+        row.addStretch(1)
+        box.addLayout(row)
+        box.addWidget(_label('Slowed down, they take at most 1 MB/s down and 64 KB/s up.', 8.5, role='dim', wrap=True))
+        box.addSpacing(4)
+        box.addWidget(_label('A game counts when Windows knows it as one, as Game Bar does, and its window fills the '
+                             'screen.', 8.5, role='dim', wrap=True))
+        self._game_edited(theme.game_quiet_chosen(), save=False)
+        layout.addWidget(frame)
+        layout.addStretch(1)
+        return page
+
+    def _sound(self, on: bool, hotkey: str, chosen: list) -> QWidget:
+        page, layout = self._page('Sound', '')
+        frame, box = _section('Sound output')
+        holder, self.sound_on = _switch('Switch the sound output with a hotkey', 'A pop-up names the output it went '
+                                        'to.', on)
+        self.sound_on.toggled.connect(self._sound_edited)
+        box.addWidget(holder)
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        row.addWidget(_label('Hotkey:', 9.5))
+        self.sound_key = QKeySequenceEdit(QKeySequence(hotkey))
+        self.sound_key.setMaximumSequenceLength(1)
+        self.sound_key.setClearButtonEnabled(True)
+        self.sound_key.setFixedWidth(200)
+        self.sound_key.editingFinished.connect(self._sound_edited)
+        row.addWidget(self.sound_key)
+        row.addStretch(1)
+        box.addLayout(row)
+        self.sound_problem = _label('', 9, role='error', wrap=True)
+        self.sound_problem.hide()
+        box.addWidget(self.sound_problem)
+        box.addSpacing(4)
+        box.addWidget(_label('Switch between:', 9, role='dim'))
+        self.output_grid = QGridLayout()
+        self.output_grid.setContentsMargins(0, 0, 0, 0)
+        self.output_grid.setHorizontalSpacing(24)
+        self.output_grid.setVerticalSpacing(6)
+        box.addLayout(self.output_grid)
+        self.outputs: dict[str, QCheckBox] = {}
+        self._chosen_away: list[str] = []
+        box.addWidget(_label('With fewer than two ticked, it goes through all of them.', 8.5, role='dim', wrap=True))
+        self.show_outputs([], chosen)
+        layout.addWidget(frame)
+        layout.addStretch(1)
+        return page
+
+    def show_outputs(self, outputs: list, chosen: list) -> None:
+        """The sound outputs plugged in now, ticked as chosen; those chosen but not plugged in stay so."""
+        for check in self.outputs.values():
+            self.output_grid.removeWidget(check)
+            check.deleteLater()
+        self.outputs = {}
+        present = {output.id for output in outputs}
+        self._chosen_away = [i for i in chosen if i not in present]
+        for index, output in enumerate(outputs):
+            check = QCheckBox(output.name)
+            check.setChecked(output.id in chosen)
+            check.setCursor(Qt.PointingHandCursor)
+            check.toggled.connect(self._sound_edited)
+            self.outputs[output.id] = check
+            self.output_grid.addWidget(check, index // 2, index % 2)
+        self.output_grid.setColumnStretch(2, 1)
+
+    def show_sound_problem(self, problem: str) -> None:
+        self.sound_problem.setText(problem)
+        self.sound_problem.setVisible(bool(problem))
+
     def _updates(self, check: bool, notify: bool, auto: bool) -> QWidget:
         page, layout = self._page('Updates', 'Hanami installs and updates the suite’s apps from their releases on '
                                              'GitHub, checking each one’s signature first.')
@@ -547,6 +642,18 @@ class SettingsWindow(QWidget):
             self.startup_changed.emit(self.startup.isChecked(),
                                       [name for name, check in self.start_with.items() if check.isChecked()])
 
+    def _game_edited(self, on: bool, save: bool = True) -> None:
+        if save:
+            theme.set_game_quiet(on)
+        for button in self.download_buttons.values():
+            button.setEnabled(on)
+
+    def _sound_edited(self, *_) -> None:
+        keys = self.sound_key.keySequence()
+        hotkey = keys.toString(QKeySequence.PortableText) if not keys.isEmpty() else ''
+        chosen = self._chosen_away + [i for i, check in self.outputs.items() if check.isChecked()]
+        self.sound_changed.emit(self.sound_on.isChecked(), hotkey, chosen)
+
     def _updates_edited(self, *_) -> None:
         self.updates_changed.emit(self.check.isChecked(), self.notify.isChecked(), self.auto.isChecked())
 
@@ -571,6 +678,8 @@ class SettingsWindow(QWidget):
                 self.motion.blockSignals(True)
                 self.motion.setChecked(theme.motion_chosen())
                 self.motion.blockSignals(False)
+            for name, button in self.download_buttons.items():
+                button.setChecked(theme.game_downloads() == name)
             for line in self.findChildren(QLabel, 'about'):
                 _indent(line)
             self._show_credit()

@@ -30,6 +30,10 @@ user32.PrivateExtractIconsW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, ctypes.c
                                         wintypes.UINT, wintypes.UINT]
 user32.PrivateExtractIconsW.restype = wintypes.UINT
 user32.DestroyIcon.argtypes = [wintypes.HICON]
+user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+user32.RegisterHotKey.restype = wintypes.BOOL
+user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
+WM_HOTKEY = 0x0312
 shell32 = ctypes.WinDLL('shell32', use_last_error=True)
 shell32.SHChangeNotify.argtypes = [wintypes.LONG, wintypes.UINT, ctypes.c_void_p, ctypes.c_void_p]
 SHCNE_UPDATEITEM, SHCNF_PATHW, SHCNF_FLUSH = 0x00002000, 0x0005, 0x1000

@@ -30,6 +30,8 @@ app = QApplication.instance() or QApplication([])
 from hanami.ui import suitetheme  # noqa: E402
 
 TEST_KEY = r'Software\blossqt\SuiteThemeTest'
+# A game really in front would quiet the glass under these tests: none is, here (GameTests stands in its own).
+suitetheme.game_in_front = lambda: False
 
 
 class LookTests(unittest.TestCase):
@@ -366,6 +368,194 @@ class RimTests(unittest.TestCase):
         self.assertGreater(image.pixelColor(150, 0).alpha(), 100, 'bright at the edge')
         self.assertGreater(image.pixelColor(150, 0).alpha(), image.pixelColor(150, 5).alpha(), 'fading inwards')
         self.assertEqual(image.pixelColor(150, 100).alpha(), 0, 'nothing in the middle')
+
+
+def _wait(ms: int) -> None:
+    loop = QEventLoop()
+    QTimer.singleShot(ms, loop.quit)
+    loop.exec()
+
+
+class GameTests(unittest.TestCase):
+    """Keeping quiet while a full-screen game is in front. No game is ever really in front here:
+    which window is, is a stand-in."""
+
+    def setUp(self):
+        self._key = suitetheme._LOOK_KEY
+        suitetheme._LOOK_KEY = TEST_KEY
+        self.in_front = False
+        self._patch = mock.patch.object(suitetheme, 'game_in_front', lambda: self.in_front)
+        self._patch.start()
+        suitetheme._check_game()
+
+    def tearDown(self):
+        self._patch.stop()
+        suitetheme._game_callbacks.clear()
+        suitetheme._LOOK_KEY = self._key
+        suitetheme._game_quiet = False
+        try:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, TEST_KEY)
+        except OSError:
+            pass
+
+    def test_apps_hear_when_a_game_comes_and_goes(self):
+        heard = []
+        suitetheme.on_game(heard.append)
+        self.assertFalse(suitetheme.quiet_now())
+        self.in_front = True
+        suitetheme._check_game()
+        self.assertTrue(suitetheme.quiet_now())
+        suitetheme._check_game()                                # still there: said once
+        self.in_front = False
+        suitetheme._check_game()
+        self.assertEqual(heard, [True, False])
+
+    def test_not_when_turned_off(self):
+        self.assertTrue(suitetheme.game_quiet_chosen(), 'on until turned off')
+        suitetheme.set_game_quiet(False)
+        self.in_front = True
+        suitetheme._check_game()
+        self.assertFalse(suitetheme.quiet_now())
+        suitetheme.set_game_quiet(True)
+        self.assertTrue(suitetheme.quiet_now(), 'turning it on takes effect at once')
+
+    def test_grabbits_downloads_slow_down_unless_chosen_otherwise(self):
+        self.assertEqual(suitetheme.game_downloads(), 'slow')
+        suitetheme.set_game_downloads('pause')
+        self.assertEqual(suitetheme.game_downloads(), 'pause')
+        suitetheme.set_game_downloads('nonsense')
+        self.assertEqual(suitetheme.game_downloads(), 'slow')
+
+    def test_the_glass_takes_no_shots_of_a_game(self):
+        window = QWidget()
+        window.resize(200, 120)
+        self.in_front = True
+        suitetheme._check_game()
+        with mock.patch.object(suitetheme, '_where', lambda w: self.fail('looked at the screen')):
+            suitetheme._capture(window)
+            self.assertTrue(suitetheme._capture_later(window, final=True))
+
+    def test_games_are_the_ones_windows_knows(self):
+        games = suitetheme._known_games()
+        self.assertTrue(all(path == os.path.normcase(path) for path in games))
+        self.assertIsInstance(suitetheme._program_of(os.getpid()), str)
+
+
+class MotionTests(unittest.TestCase):
+    """The animations that came with 2026-10-24: parts rising into place, pop-ups fading out and
+    progress gliding."""
+
+    def setUp(self):
+        self._key = suitetheme._LOOK_KEY
+        suitetheme._LOOK_KEY = TEST_KEY
+        suitetheme._motion = None
+
+    def tearDown(self):
+        suitetheme._LOOK_KEY = self._key
+        suitetheme._motion = None
+        try:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, TEST_KEY)
+        except OSError:
+            pass
+
+    def test_a_windows_parts_rise_into_place_one_after_another(self):
+        window = QWidget()
+        layout = QVBoxLayout(window)
+        parts = [QPushButton(f'Part {n}') for n in range(3)]
+        for part in parts:
+            layout.addWidget(part)
+        suitetheme.frost(window)
+        window.show()
+        app.processEvents()
+        effects = [part.graphicsEffect() for part in parts]
+        self.assertTrue(all(isinstance(e, suitetheme._Rise) for e in effects), 'each comes in')
+        _wait(80)
+        self.assertGreater(effects[0].step, effects[2].step, 'the first is further along')
+        where = [part.pos() for part in parts]
+        _wait(500)
+        self.assertEqual([part.graphicsEffect() for part in parts], [None] * 3, 'and is left as it was')
+        self.assertEqual([part.pos() for part in parts], where, 'drawn so, never moved')
+        window.close()
+
+    def test_a_pages_sections_rise_as_it_comes_up(self):
+        from PySide6.QtWidgets import QFrame, QStackedWidget
+        window = QWidget()
+        stack = QStackedWidget()
+        QVBoxLayout(window).addWidget(stack)
+        stack.addWidget(QWidget())
+        page = QWidget()
+        sections = []
+        for _ in range(2):
+            frame = QFrame()
+            frame.setObjectName('section')
+            QVBoxLayout(page).addWidget(frame) if not sections else page.layout().addWidget(frame)
+            sections.append(frame)
+        stack.addWidget(page)
+        suitetheme.frost(window)
+        window.show()
+        _wait(500)
+        stack.setCurrentIndex(1)
+        self.assertTrue(all(isinstance(s.graphicsEffect(), suitetheme._Rise) for s in sections))
+        window.close()
+
+    def test_a_rising_part_is_drawn_lower_and_fainter(self):
+        window = QWidget()
+        window.resize(60, 70)
+        window.setStyleSheet('background: white')
+        part = QWidget(window)
+        part.setGeometry(0, 0, 40, 40)
+        part.setStyleSheet('background: red')
+        effect = suitetheme._Rise(part, 10)
+        part.setGraphicsEffect(effect)
+        effect.step = 0.5
+        window.show()
+        app.processEvents()
+        picture = window.grab().toImage()
+        self.assertEqual(picture.pixelColor(20, 2), QColor('white'), 'its top is lower')
+        faint = picture.pixelColor(20, 25)
+        self.assertTrue(faint.red() == 255 and 100 < faint.green() < 160, f'half there: {faint.name()}')
+        window.close()
+
+    def test_a_pop_up_fades_out_then_closes(self):
+        window = QWidget(None, Qt.FramelessWindowHint | Qt.Tool)
+        window.resize(100, 60)
+        window.show()
+        app.processEvents()
+        closed = []
+        suitetheme.fade_out(window, lambda: (closed.append(True), window.hide()))
+        suitetheme.fade_out(window)                             # asked again meanwhile: once is enough
+        self.assertTrue(window.isVisible(), 'still there, fading')
+        _wait(300)
+        self.assertEqual(closed, [True])
+        self.assertFalse(window.isVisible())
+        self.assertEqual(window.windowOpacity(), 1.0, 'ready to be shown again')
+
+    def test_at_once_with_animations_off(self):
+        suitetheme.set_motion(False)
+        window = QWidget(None, Qt.FramelessWindowHint | Qt.Tool)
+        window.show()
+        app.processEvents()
+        suitetheme.fade_out(window)
+        self.assertFalse(window.isVisible())
+
+    def test_progress_glides_forward_and_jumps_back(self):
+        from PySide6.QtWidgets import QProgressBar
+        window = QWidget()
+        bar = QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(0)
+        QVBoxLayout(window).addWidget(bar)
+        suitetheme.frost(window)
+        window.show()
+        app.processEvents()
+        bar.setValue(80)
+        app.processEvents()
+        self.assertLess(bar.value(), 80, 'on its way')
+        _wait(450)
+        self.assertEqual(bar.value(), 80, 'and there')
+        bar.setValue(10)
+        self.assertEqual(bar.value(), 10, 'going back is at once')
+        window.close()
 
 
 if __name__ == '__main__':
