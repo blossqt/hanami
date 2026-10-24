@@ -115,7 +115,10 @@ class StartWithTests(unittest.TestCase):
             for answer in (True, (True, 4321), 'fail'):
                 Process.answer, asked[:] = answer, []
                 controller._start_chosen()
-                self.assertEqual(asked, [['--startup'], [], []], f'all three, answered {answer!r}')
+                self.assertEqual(asked, [['--startup'], [], ['--no-window']], f'all three, answered {answer!r}')
+            Process.answer, asked[:] = True, []
+            controller.open_app('Homework Hub')                         # its Open button
+            self.assertEqual(asked, [[]], 'opened by hand, it opens its window')
             self.assertTrue(controller.card_state('Dropshift').starting, 'its card says "Starting…"')
             hanami.Controller.is_running = lambda self, name: True             # and now it is up
             controller._refresh()

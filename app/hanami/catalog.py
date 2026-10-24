@@ -26,7 +26,7 @@ class SuiteApp:
     release_name: str = ''  # the "app" its latest.json names, when that isn't `name`
     single_exe: bool = False   # its release is the exe itself, not a zip holding its folder
     self_test: bool = True     # its exe answers --self-test <file> with its version
-    # What it is started with at sign-in, to stay in the background rather than open its window.
+    # What it is started with along with Hanami, to stay in the background rather than open its window.
     # Only for apps that ask: Grabbit, say, takes any argument for a link to download.
     startup_args: tuple[str, ...] = ()
 
@@ -53,7 +53,7 @@ SUITE = (
     SuiteApp('Homework Hub', 'Every assignment due, from every course site, in one list.', 'HomeworkHub.exe',
              _DOCUMENTS / 'homework-hub' / 'dist' / 'HomeworkHub.exe',
              'blossqt/homework-hub-releases', 'd7cfd2d285134baa76c7a45512b9d04ccb63601364bbaff1f7898c3eba479b20',
-             release_name='HomeworkHub', single_exe=True, self_test=False),
+             release_name='HomeworkHub', single_exe=True, self_test=False, startup_args=('--no-window',)),
 )
 
 # Hanami itself: checked for newer releases, which its window then points to.
