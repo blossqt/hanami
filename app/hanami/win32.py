@@ -84,6 +84,47 @@ def running_programs() -> set[str]:
     return found
 
 
+# --------------------------------------------------------------------------- the window in front
+
+class _MonitorInfo(ctypes.Structure):
+    _fields_ = [('cbSize', wintypes.DWORD), ('rcMonitor', wintypes.RECT), ('rcWork', wintypes.RECT),
+                ('dwFlags', wintypes.DWORD)]
+
+
+user32.GetForegroundWindow.restype = wintypes.HWND
+user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+user32.MonitorFromWindow.argtypes, user32.MonitorFromWindow.restype = [wintypes.HWND, wintypes.DWORD], wintypes.HMONITOR
+user32.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(_MonitorInfo)]
+user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+user32.GetAsyncKeyState.argtypes, user32.GetAsyncKeyState.restype = [ctypes.c_int], ctypes.c_short
+_DESKTOP_CLASSES = {'Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd'}
+
+
+def fullscreen_in_front() -> bool:
+    """Whether the window in front fills its screen - a game, a video, a presentation (the desktop
+    itself, which fills it too, doesn't count)."""
+    hwnd = user32.GetForegroundWindow()
+    if not hwnd:
+        return False
+    name = ctypes.create_unicode_buffer(64)
+    user32.GetClassNameW(hwnd, name, len(name))
+    if name.value in _DESKTOP_CLASSES:
+        return False
+    rect, info = wintypes.RECT(), _MonitorInfo()
+    info.cbSize = ctypes.sizeof(info)
+    if not user32.GetWindowRect(hwnd, ctypes.byref(rect)) \
+            or not user32.GetMonitorInfoW(user32.MonitorFromWindow(hwnd, 2), ctypes.byref(info)):
+        return False
+    screen = info.rcMonitor
+    return rect.left <= screen.left and rect.top <= screen.top and rect.right >= screen.right \
+        and rect.bottom >= screen.bottom
+
+
+def buttons_down() -> bool:
+    """Whether a mouse button is held - dragging something, say."""
+    return any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in (0x01, 0x02, 0x04))    # left, right, middle
+
+
 # --------------------------------------------------------------------------- start with Windows
 
 _RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'

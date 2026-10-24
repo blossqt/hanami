@@ -339,6 +339,7 @@ class SettingsWindow(QWidget):
     updates_changed = Signal(bool, bool, bool)      # look by itself, tell me, install by itself
     sound_changed = Signal(bool, str)               # the hotkey on, the hotkey
     output_chosen = Signal(str, str, str)           # 'speakers' or 'headphones', the output's id ('' for none), its name
+    panel_changed = Signal(str)                     # the edge the panel slides out at: 'right', 'left' or '' (off)
     check_now = Signal()
     show_page = Signal(str)
     open_url = Signal(str)
@@ -347,7 +348,7 @@ class SettingsWindow(QWidget):
              ('', 'About')]
 
     def __init__(self, start_with: list[str], starts_with_windows: bool, updates: tuple[bool, bool, bool],
-                 sound: tuple[bool, str] = (True, '')):
+                 sound: tuple[bool, str] = (True, ''), panel_edge: str = 'right'):
         super().__init__()
         self.setWindowTitle('Hanami settings')
         self.setWindowIcon(icons.app_icon())
@@ -372,7 +373,7 @@ class SettingsWindow(QWidget):
         side.addStretch(1)
         outer.addLayout(side)
         self.pages = QStackedWidget()
-        self.pages.addWidget(self._general(start_with, starts_with_windows))
+        self.pages.addWidget(self._general(start_with, starts_with_windows, panel_edge))
         self.pages.addWidget(self._appearance())
         self.pages.addWidget(self._games())
         self.pages.addWidget(self._sound(*sound))
@@ -401,7 +402,7 @@ class SettingsWindow(QWidget):
             layout.addWidget(_label(about, 9, role='dim', wrap=True))
         return page, layout
 
-    def _general(self, start_with: list[str], starts_with_windows: bool) -> QWidget:
+    def _general(self, start_with: list[str], starts_with_windows: bool, panel_edge: str = 'right') -> QWidget:
         page, layout = self._page('General', '')
         frame, box = _section('Starting up')
         holder, self.startup = _switch('Start Hanami when I sign in to Windows',
@@ -424,6 +425,31 @@ class SettingsWindow(QWidget):
         grid.setColumnStretch(2, 1)
         box.addLayout(grid)
         self.startup.toggled.connect(self._startup_edited)
+        layout.addWidget(frame)
+        frame, box = _section('Edge panel')
+        holder, self.panel_on = _switch('Slide out a panel at the edge of the screen',
+                                        'Rest the pointer at the middle of the edge. The panel holds the suite’s apps '
+                                        'and the sound switch, and stays away from games and anything full screen.',
+                                        bool(panel_edge))
+        self.panel_on.toggled.connect(self._panel_edited)
+        box.addWidget(holder)
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        row.addWidget(_label('Edge:', 9.5))
+        self.panel_edges = QButtonGroup(self)
+        self.edge_buttons: dict[str, QPushButton] = {}
+        for name, title in (('left', 'Left'), ('right', 'Right')):
+            button = QPushButton(title)
+            button.setCheckable(True)
+            button.setChecked((panel_edge or 'right') == name)
+            button.setCursor(Qt.PointingHandCursor)
+            button.clicked.connect(self._panel_edited)
+            self.panel_edges.addButton(button)
+            self.edge_buttons[name] = button
+            row.addWidget(button)
+        row.addStretch(1)
+        box.addLayout(row)
+        self._panel_edited(emit=False)
         layout.addWidget(frame)
         frame, box = _section('The tray')
         box.addWidget(_label('Closing Hanami’s window keeps it in the tray, as the blossom. Its menu holds each running '
@@ -656,6 +682,14 @@ class SettingsWindow(QWidget):
         for button in self.download_buttons.values():
             button.setEnabled(on)
 
+    def _panel_edited(self, *_, emit: bool = True) -> None:
+        on = self.panel_on.isChecked()
+        for button in self.edge_buttons.values():
+            button.setEnabled(on)
+        edge = next((name for name, button in self.edge_buttons.items() if button.isChecked()), 'right')
+        if emit:
+            self.panel_changed.emit(edge if on else '')
+
     def _sound_edited(self, *_) -> None:
         keys = self.sound_key.keySequence()
         hotkey = keys.toString(QKeySequence.PortableText) if not keys.isEmpty() else ''
@@ -672,8 +706,10 @@ class SettingsWindow(QWidget):
         self.updates_changed.emit(self.check.isChecked(), self.notify.isChecked(), self.auto.isChecked())
 
     def _show_credit(self) -> None:
+        link = f'style="color:{theme.ink()}; text-decoration:none"'
         self.credit.setText(f'The blossom behind this window is a photo by <a href="https://unsplash.com/photos/'
-                            f'pkpqoBp11Jc" style="color:{theme.ink()}; text-decoration:none">Mi Min</a> on Unsplash.')
+                            f'pkpqoBp11Jc" {link}>Mi Min</a> on Unsplash, and the one behind the edge panel by '
+                            f'<a href="https://unsplash.com/photos/j3TrGxN_rCM" {link}>Yan Liu</a>.')
 
     def show_checked(self, text: str, checking: bool) -> None:
         self.checked.setText(text)

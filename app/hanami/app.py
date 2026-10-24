@@ -4,8 +4,9 @@ The suite's apps fold their tray menus into Hanami's icon (host.py and each
 app's suitelink.py), so the tray holds one icon however many of them run.
 Hanami also installs and updates them, from their signed GitHub releases
 (releases.py, installer.py). And it keeps the suite's sound-output hotkey
-(audio.py, ui/sound.py), and holds the apps' notifications back while a
-full-screen game is in front (suitetheme's on_game).
+(audio.py, ui/sound.py), the edge panel that slides out at the screen's edge
+with the apps and the sound switch (ui/panel.py), and holds the apps'
+notifications back while a full-screen game is in front (suitetheme's on_game).
 """
 
 from __future__ import annotations
@@ -29,7 +30,8 @@ from . import APP_NAME, __version__, audio, catalog, installer, releases, suitel
 from .host import TrayHost
 from .hotkeys import Hotkeys, HotkeyError, normalize
 from .ui import icons, theme
-from .ui.launcher import CardState, LauncherWindow
+from .ui.launcher import CardState, LauncherWindow, placeholder_icon
+from .ui.panel import EdgePanel
 from .ui.settings import SettingsWindow
 from .ui.sound import HEADPHONES, SPEAKER, SoundPopup, sounds_like_headphones
 
@@ -141,6 +143,16 @@ class Settings:
     def set_output(self, which: str, output_id: str, name: str) -> None:
         self._store.setValue(f'sound/{which}', json.dumps([output_id, name] if output_id else None))
 
+    @property
+    def panel_edge(self) -> str:
+        """The edge of the screen the panel slides out at: 'right', 'left' or '' (off)."""
+        edge = str(self._store.value('panel/edge', 'right'))
+        return edge if edge in ('right', 'left', '') else 'right'
+
+    @panel_edge.setter
+    def panel_edge(self, edge: str) -> None:
+        self._store.setValue('panel/edge', edge)
+
     def set_sound(self, on: bool, hotkey: str) -> None:
         self._store.setValue('sound/hotkey_on', 'true' if on else 'false')
         self._store.setValue('sound/hotkey', hotkey)
@@ -204,6 +216,13 @@ class Controller(QObject):
         self._make_tray()
         self._listen()
         self.sound_popup: SoundPopup | None = None
+        self.panel = EdgePanel(allowed=self._panel_allowed)
+        self.panel.open_app.connect(self.open_app)
+        self.panel.open_hanami.connect(self.show_window)
+        self.panel.output_clicked.connect(self.choose_output)
+        self.panel.showing.connect(self._fill_panel)
+        self.panel.set_edge(self.settings.panel_edge)
+        self._panel_icons: dict[str, tuple] = {}
         self.hotkeys = Hotkeys(self)
         self.hotkeys.pressed.connect(self._hotkey)
         self.sound_problem = self._register_hotkeys()
@@ -412,9 +431,10 @@ class Controller(QObject):
         self._update_sound()
 
     def _update_sound(self) -> None:
-        """The switch at the top of Hanami's window: lit on the speakers or the headphones, as the
-        sound goes to one of them now."""
-        if self.window is None or not self.window.isVisible():
+        """The switches at the top of Hanami's window and in the edge panel: lit on the speakers or
+        the headphones, as the sound goes to one of them now."""
+        toggles = [owner.sound for owner in (self.window, self.panel) if owner is not None and owner.isVisible()]
+        if not toggles:
             return
         chosen = self.outputs_chosen()
         try:
@@ -423,7 +443,50 @@ class Controller(QObject):
             now = ''
         side = next((which for which, picked in chosen.items() if picked and picked[0] == now), None)
         names = {which: picked[1] if picked else 'not chosen' for which, picked in chosen.items()}
-        self.window.sound.show_output(side, f'Speakers: {names["speakers"]}\nHeadphones: {names["headphones"]}')
+        for toggle in toggles:
+            toggle.show_output(side, f'Speakers: {names["speakers"]}\nHeadphones: {names["headphones"]}')
+
+    # ------------------------------------------------------------------ the edge panel
+
+    def _panel_allowed(self) -> bool:
+        """Whether the panel may come out now: not over a game, nor anything else full screen, nor
+        while something is being dragged."""
+        return not theme.quiet_now() and not win32.fullscreen_in_front() and not win32.buttons_down()
+
+    def _fill_panel(self) -> None:
+        """The panel's apps - those on this PC, a dot by those running - and its sound switch."""
+        apps = []
+        for app in catalog.SUITE:
+            exe = self.settings.exe(app.name)
+            if exe is None:
+                continue
+            apps.append((app.name, self._panel_icon(app.name, exe), self.is_running(app.name)))
+        self.panel.show_apps(apps)
+        QTimer.singleShot(0, self._update_sound)
+
+    def _panel_icon(self, name: str, exe: Path):
+        """An app's own icon, from its exe, for the panel - kept until the exe changes."""
+        from PySide6.QtGui import QPixmap
+        try:
+            key = (str(exe), exe.stat().st_mtime)
+        except OSError:
+            key = None
+        kept = self._panel_icons.get(name)
+        if kept is not None and kept[0] == key:
+            return kept[1]
+        ratio = self.panel.devicePixelRatioF()
+        image = win32.exe_icon(exe, round(48 * ratio)) if key else None
+        if image is not None:
+            pixmap = QPixmap.fromImage(image)
+            pixmap.setDevicePixelRatio(ratio)
+        else:
+            pixmap = placeholder_icon(name, 48)
+        self._panel_icons[name] = (key, pixmap)
+        return pixmap
+
+    def _panel_changed(self, edge: str) -> None:
+        self.settings.panel_edge = edge
+        self.panel.set_edge(edge)
 
     def _output_chosen(self, which: str, output_id: str, name: str) -> None:
         self.settings.set_output(which, output_id, name)
@@ -803,10 +866,11 @@ class Controller(QObject):
             s = self.settings
             self.settings_window = SettingsWindow(s.start_with, win32.starts_with_windows(),
                                                   (s.check_updates, s.notify_updates, s.auto_update),
-                                                  (s.sound_hotkey_on, s.sound_hotkey))
+                                                  (s.sound_hotkey_on, s.sound_hotkey), s.panel_edge)
             self.settings_window.startup_changed.connect(self._startup_changed)
             self.settings_window.sound_changed.connect(self._sound_changed)
             self.settings_window.output_chosen.connect(self._output_chosen)
+            self.settings_window.panel_changed.connect(self._panel_changed)
             self.settings_window.updates_changed.connect(self._updates_changed)
             self.settings_window.check_now.connect(self.check_releases)
             self.settings_window.show_page.connect(self.show_page)
@@ -870,6 +934,7 @@ class Controller(QObject):
         for job in self.jobs.values():
             job.cancel.set()
         self.hotkeys.clear()
+        self.panel.set_edge('')
         self.host.close()
         self.tray.hide()
         QApplication.quit()

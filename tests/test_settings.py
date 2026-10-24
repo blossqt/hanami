@@ -10,6 +10,7 @@ written down instead.
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -326,6 +327,106 @@ class SoundTests(_Controlled):
         self.assertTrue(self.controller.settings_window.sound_problem.text())
         self.assertEqual(self.controller.settings.sound_hotkey, hanami.SOUND_HOTKEY, 'the old one is kept')
         self.controller.settings_window.close()
+
+
+class PanelTests(_Controlled):
+    """The edge panel. Where the pointer is, and what is in front, are stand-ins."""
+
+    def setUp(self):
+        super().setUp()
+        from unittest import mock
+        from PySide6.QtCore import QPoint
+        from PySide6.QtGui import QGuiApplication
+        from hanami.ui import panel
+        self.panel_module, self.QPoint = panel, QPoint
+        self.screen = QGuiApplication.primaryScreen().geometry()
+        self.point = QPoint(self.screen.center())
+        self.full_screen = False
+        self._patches = [mock.patch.object(panel, 'pointer', lambda: self.point),
+                         mock.patch.object(hanami.win32, 'fullscreen_in_front', lambda: self.full_screen),
+                         mock.patch.object(hanami.win32, 'buttons_down', lambda: False),
+                         mock.patch.object(self.suitetheme, 'motion_on', lambda: False),
+                         mock.patch.object(panel.theme, 'motion_on', lambda: False),      # as the panel calls it
+                         mock.patch.object(self.suitetheme, 'game_in_front', lambda: False),
+                         # Keytap and Dropshift on this PC, and no other app
+                         mock.patch.object(hanami.Settings, 'exe', lambda s, name: Path(sys.executable)
+                                           if name in ('Keytap', 'Dropshift') else None)]
+        for patch in self._patches:
+            patch.start()
+        self.suitetheme._check_game()
+        self.panel = self.controller.panel
+        self.opened = []
+        self.controller.open_app = lambda name, startup=False: self.opened.append(name)
+        self.controller.choose_output = lambda which, say=False: self.opened.append(which)
+        self.panel.open_app.disconnect()
+        self.panel.open_app.connect(lambda name: self.controller.open_app(name))
+        self.panel.output_clicked.disconnect()
+        self.panel.output_clicked.connect(lambda which: self.controller.choose_output(which))
+        self.panel.set_edge('right')
+
+    def tearDown(self):
+        self.panel.set_edge('')
+        for patch in self._patches:
+            patch.stop()
+        super().tearDown()
+
+    def rest_at(self, x, y, seconds):
+        """The pointer at (x, y) for a while, the panel looking as it does."""
+        self.point = self.QPoint(x, y)
+        loop_until = time.monotonic() + seconds
+        while time.monotonic() < loop_until:
+            self.panel._look()
+            qt.processEvents()
+            time.sleep(0.02)
+
+    def test_resting_at_the_middle_of_the_edge_brings_it_out(self):
+        s = self.screen
+        self.rest_at(s.right(), s.center().y(), 0.1)
+        self.assertFalse(self.panel.isVisible(), 'not at once: passing by is not resting')
+        self.rest_at(s.right(), s.center().y(), 0.4)
+        self.assertTrue(self.panel.isVisible())
+        g = self.panel.frameGeometry()
+        self.assertEqual(g.right(), s.right() - self.panel_module.MARGIN, 'against the edge it came from')
+        self.assertIn('Keytap', self.panel.buttons, 'with the apps on this PC')
+        self.assertNotIn('Grabbit', self.panel.buttons)
+        self.rest_at(s.center().x(), s.center().y(), 0.7)
+        self.assertFalse(self.panel.isVisible(), 'and goes once the pointer has left it')
+
+    def test_not_at_the_ends_of_the_edge_nor_over_anything_full_screen(self):
+        s = self.screen
+        self.rest_at(s.right(), s.top() + 5, 0.5)
+        self.assertFalse(self.panel.isVisible(), 'the top corner is for windows’ own buttons')
+        self.full_screen = True
+        self.rest_at(s.right(), s.center().y(), 0.5)
+        self.assertFalse(self.panel.isVisible())
+        self.full_screen = False
+        self.panel.set_edge('left')
+        self.rest_at(s.right(), s.center().y(), 0.5)
+        self.assertFalse(self.panel.isVisible(), 'only the edge chosen')
+        self.rest_at(s.left(), s.center().y(), 0.5)
+        self.assertTrue(self.panel.isVisible())
+        self.assertEqual(self.panel.frameGeometry().left(), s.left() + self.panel_module.MARGIN)
+
+    def test_choosing_in_it(self):
+        s = self.screen
+        self.rest_at(s.right(), s.center().y(), 0.4)
+        self.panel.buttons['Dropshift'].clicked.emit('Dropshift')
+        self.assertEqual(self.opened, ['Dropshift'])
+        self.assertFalse(self.panel.isVisible(), 'it goes once something is chosen')
+        self.rest_at(s.center().x(), s.center().y(), 0.1)
+        self.rest_at(s.right(), s.center().y(), 0.4)
+        self.panel.sound.chosen.emit('headphones')
+        self.assertEqual(self.opened[-1], 'headphones')
+
+    def test_turned_off_or_moved_in_settings(self):
+        window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY), 'right')
+        window.panel_changed.connect(self.controller._panel_changed)
+        window.edge_buttons['left'].click()
+        self.assertEqual((self.controller.settings.panel_edge, self.panel.edge), ('left', 'left'))
+        window.panel_on.setChecked(False)
+        self.assertEqual((self.controller.settings.panel_edge, self.panel.edge), ('', None))
+        self.assertFalse(window.edge_buttons['right'].isEnabled())
+        window.close()
 
 
 if __name__ == '__main__':
