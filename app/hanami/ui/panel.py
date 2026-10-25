@@ -42,6 +42,8 @@ PIN_ICON = 40
 PIN_TILE = (INNER - 4) // 2
 PAGES = ('apps', 'pinned', 'stats')    # the Hanami suite, shortcuts, stats: those chosen are shown, in this order
 STATS_EVERY = 1000      # ms between samples, while the stats page is in sight
+STATS_QUICK = 250, 2.0  # ms between samples, for the first s of it: so the processor's temperature
+                        # shows as soon as Hanami Sensors has it, when it has just been started
 MARGIN = 10             # between the panel and the screen's edge
 NEAR = 48               # px in from the screen's edge that count as at it
 DWELL = 0.3             # s the pointer rests at the edge before the panel comes out
@@ -601,6 +603,7 @@ class EdgePanel(QWidget):
         self.pin_buttons: list[QWidget] = []
         self._stats = QTimer(self)
         self._stats.setInterval(STATS_EVERY)
+        self._quick_until = 0.0
         self._stats.timeout.connect(self._sample)
 
         self._watch = QTimer(self)
@@ -710,6 +713,8 @@ class EdgePanel(QWidget):
         wanted = (self.isVisible() and not self._leaving and PAGES[self.pages.current] == 'stats'
                   and self.stats_source is not None)
         if wanted and not self._stats.isActive():
+            self._quick_until = time.monotonic() + STATS_QUICK[1]
+            self._stats.setInterval(STATS_QUICK[0])
             self._sample()
             self._stats.start()
         elif not wanted:
@@ -717,9 +722,13 @@ class EdgePanel(QWidget):
 
     def _sample(self) -> None:
         try:
-            self.show_stats(self.stats_source())
+            stats = self.stats_source()
+            self.show_stats(stats)
         except Exception:                   # noqa: BLE001 - a sample that fails leaves the last one
-            pass
+            return
+        if self._stats.interval() != STATS_EVERY and (stats.cpu_temp is not None
+                                                      or time.monotonic() > self._quick_until):
+            self._stats.setInterval(STATS_EVERY)
 
     def showEvent(self, event):
         super().showEvent(event)

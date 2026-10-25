@@ -554,6 +554,7 @@ class Controller(QObject):
         self.panel.show_pins([(pin.name, self._pin_icon(pin)) for pin in self.settings.pinned])
         if 'stats' in self.settings.panel_pages:
             self.sampler.prepare()                  # NVIDIA's driver, loaded only for the stats page
+            self.sampler.sensors.wake()             # Hanami Sensors started now, ready by the time it is in sight
         QTimer.singleShot(0, self._update_sound)
 
     def _pin_icon(self, pin: pins.Pin):

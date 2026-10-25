@@ -70,6 +70,28 @@ class ReaderTests(unittest.TestCase):
         finally:
             block.close()
 
+    def test_a_stale_reading_starts_the_service_at_once(self):
+        # The memory outlives the service while Hanami holds it: a reading there may be long dead,
+        # and it is its age - not whether it is new to this reader - that tells.
+        from unittest import mock
+        name = f'Local\\HanamiSensorsStale{os.getpid()}'
+        block = _Block(name)
+        started = []
+        try:
+            with mock.patch.object(sensors, 'start', lambda service: started.append(service)):
+                block.write(2, 0, int(time.time() * 1000) - 75 * 60_000, 72.9)       # 75 minutes old
+                reader = sensors.Reader(name, name + 'Wanted', service='Stand-in')
+                self.assertIsNone(reader.temperature())
+                time.sleep(0.2)
+                self.assertEqual(started, ['Stand-in'], 'started at the first look, not seconds later')
+                block.write(4, 0, int(time.time() * 1000), 73.0)
+                reader._started_at = -sensors.START_AGAIN
+                self.assertEqual(reader.temperature(), 73.0)
+                time.sleep(0.2)
+                self.assertEqual(started, ['Stand-in'], 'a fresh reading: running, left alone')
+        finally:
+            block.close()
+
     def test_the_sampler_has_it(self):
         sampler = stats.Sampler()
         sampler.sensors = sensors.Reader(f'Local\\HanamiSensorsNone{os.getpid()}', 'Local\\none', service=None)

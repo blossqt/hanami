@@ -32,8 +32,8 @@ MEMORY = r'Global\HanamiSensors'
 WANTED = r'Global\HanamiSensorsWanted'
 MAGIC, LAYOUT, SIZE = 0x4E534E48, 1, 160
 FRESH = 5.0             # s a reading counts for
-STALE = 3.0             # s without a newer one before the service is started again
-START_AGAIN = 15.0      # s between tries at starting it
+STALE = 2.0             # s old, a reading means the service has stopped: it is started again
+START_AGAIN = 5.0       # s between tries at starting it
 INSTALLED = Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'Hanami Sensors' / 'HanamiSensors.exe'
 SETUP_ANSWERS = {
     0: '', 2: 'It needs administrator permission.', 3: 'Its files aren’t as they were built: reinstall Hanami.',
@@ -76,26 +76,30 @@ _kernel, _advapi, _shell = _calls()
 
 class Reader:
     """The processor's temperature, as Hanami Sensors last read it - asking it for a new reading
-    each time, and starting it (on a thread of its own) when its readings have gone stale."""
+    each time, and starting it (on a thread of its own) when there is none, or the last is stale:
+    a reading's own age tells, as the memory outlives the service while Hanami holds it."""
 
     def __init__(self, memory: str = MEMORY, wanted: str = WANTED, service: str | None = SERVICE):
         self.memory, self.wanted, self.service = memory, wanted, service
         self._mapping = self._view = self._event = None
         self._started_at = -START_AGAIN
-        self._last_new = time.monotonic()
-        self._last_sequence = None
         self._last_good: tuple | None = None
 
-    def temperature(self) -> float | None:
+    def wake(self) -> tuple | None:
+        """Ask for a reading - starting the service if it has stopped - and give the last one
+        there is: (sequence, status, when it was read in ms since 1970, °C), or None."""
         self._ask()
         reading = self._read() or self._last_good          # caught mid-write: the one before
         self._last_good = reading
         now = time.monotonic()
-        if reading is not None and reading[0] != self._last_sequence:
-            self._last_sequence, self._last_new = reading[0], now
-        if self.service and now - self._last_new > STALE and now - self._started_at > START_AGAIN:
+        age = None if reading is None else time.time() - reading[2] / 1000
+        if self.service and (age is None or age > STALE) and now - self._started_at > START_AGAIN:
             self._started_at = now
             threading.Thread(target=start, args=(self.service,), name='hanami-sensors', daemon=True).start()
+        return reading
+
+    def temperature(self) -> float | None:
+        reading = self.wake()
         if reading is None:
             return None
         _, status, read_at, celsius = reading

@@ -562,7 +562,13 @@ class PanelTests(_Controlled):
         self.assertEqual(self.panel.stat_rows['vram'].value, '2.0/12 GB')
         self.assertEqual(self.panel.stat_rows['gpu_temp'].value, '60°C')
         self.assertFalse(self.panel.stat_rows['cpu_temp'].isVisibleTo(self.panel),
-                         'no processor temperature without LibreHardwareMonitor')
+                         'no processor temperature without Hanami Sensors')
+        self.assertEqual(self.panel._stats.interval(), self.panel_module.STATS_QUICK[0],
+                         'looked at often at first, while the temperature may be on its way')
+        self.panel.stats_source = lambda: Stats(12.0, (8 * 2 ** 30, 32 * 2 ** 30), cpu_temp=71.0)
+        self.panel._sample()
+        self.assertEqual(self.panel.stat_rows['cpu_temp'].value, '71°C')
+        self.assertEqual(self.panel._stats.interval(), self.panel_module.STATS_EVERY, 'there: once a second')
         self._wheel(1)
         self.assertEqual(pages.current, 2, 'no further than the last')
         self.panel.slide_away()
