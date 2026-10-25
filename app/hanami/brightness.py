@@ -145,6 +145,13 @@ def friendly_names() -> dict[str, list[str]]:
     return names
 
 
+def _handle(monitor: _Physical) -> int:
+    """A monitor's handle, as a number. They are numbered across the whole session from 0 - the
+    first program to open monitors gets 0 - and ctypes reads a handle of 0 as None. Hanami 0.1.27
+    took that None for no monitor, and never set the Dell, its first."""
+    return monitor.handle or 0
+
+
 class _Ddc:
     """The monitors' handles - held from one look until the next."""
 
@@ -169,7 +176,7 @@ class _Ddc:
             friendly = names.get(device, [])
             for index, monitor in enumerate(physical):
                 name = friendly[index] if index < len(friendly) else ''
-                found.append((f'{device}#{index}', name, (left, top), monitor.handle))
+                found.append((f'{device}#{index}', name, (left, top), _handle(monitor)))
         return found
 
     @staticmethod

@@ -73,6 +73,17 @@ class MonitorsTests(unittest.TestCase):
         time.sleep(0.2)
         self.assertEqual(ddc.sent[-1], (7, 30), 'one not found is left alone')
 
+    def test_the_first_handle_of_all_is_set_too(self):
+        # Handles are numbered across the session from 0: the first program to open monitors gets
+        # 0, which ctypes reads as None. 0.1.27 never set its first monitor (the Dell).
+        self.assertEqual(brightness._handle(brightness._Physical()), 0)
+        watched, look = self.watch([(r'\\.\DISPLAY1#0', 'DELL G2524H', (0, 0), 0)], {0: (88, 100)})
+        watched.set(look()[0].key, 60)
+        until = time.monotonic() + 5
+        while time.monotonic() < until and not watched._ddc.sent:
+            time.sleep(0.02)
+        self.assertEqual(watched._ddc.sent, [(0, 60)])
+
     def test_one_just_set_or_not_answering_keeps_its_slider(self):
         watched, look = self.watch([(r'\\.\DISPLAY1#0', 'TYPEC', (0, 0), 7)], {7: (30, 50)})
         key = look()[0].key
@@ -91,7 +102,9 @@ class RealTests(unittest.TestCase):
     def test_the_monitors_here(self):
         ddc = brightness._Ddc()
         try:
-            found = [(name, handle, ddc.read(handle)) for key, name, corner, handle in ddc.open()]
+            opened = ddc.open()
+            self.assertTrue(all(isinstance(handle, int) for *_, handle in opened), 'handles as numbers')
+            found = [(name, handle, ddc.read(handle)) for key, name, corner, handle in opened]
             found = [(name, handle, reading) for name, handle, reading in found if reading is not None]
             if not found:
                 self.skipTest('no monitor here answers DDC/CI')
