@@ -574,8 +574,8 @@ class EdgePanel(QWidget):
         stats.setContentsMargins(0, 4, 0, 0)
         stats.setSpacing(10)
         self.stat_rows = {key: _Stat(name, bar) for key, name, bar in (
-            ('cpu', 'CPU', True), ('ram', 'RAM', True), ('gpu', 'GPU', True), ('vram', 'VRAM', True),
-            ('gpu_temp', 'GPU temp', False))}
+            ('cpu', 'CPU', True), ('cpu_temp', 'CPU temp', False), ('ram', 'RAM', True), ('gpu', 'GPU', True),
+            ('vram', 'VRAM', True), ('gpu_temp', 'GPU temp', False))}
         for row in self.stat_rows.values():
             stats.addWidget(row)
         stats.addStretch(1)
@@ -661,6 +661,9 @@ class EdgePanel(QWidget):
         rows = self.stat_rows
         rows['cpu'].set_value('…' if stats.cpu is None else f'{stats.cpu:.0f}%',
                               None if stats.cpu is None else stats.cpu / 100)
+        rows['cpu_temp'].setVisible(stats.cpu_temp is not None)       # only while LibreHardwareMonitor runs
+        if stats.cpu_temp is not None:
+            rows['cpu_temp'].set_value(f'{stats.cpu_temp:.0f}°C')
         used, total = stats.ram
         rows['ram'].set_value(f'{used / gb:.1f}/{total / gb:.0f} GB', used / total if total else 0.0)
         card = stats.gpu is not None or stats.vram is not None or stats.gpu_temp is not None

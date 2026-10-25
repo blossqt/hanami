@@ -490,7 +490,8 @@ class SettingsWindow(QWidget):
         for name, title, about in (
                 ('apps', 'Hanami suite', ''), ('pinned', 'Shortcuts', ''),
                 ('stats', 'Stats', 'The processor and memory - and, with an NVIDIA graphics card, its load, memory '
-                                   'and temperature.')):
+                                   'and temperature. The processor’s temperature comes from LibreHardwareMonitor, '
+                                   'while it runs with its Remote Web Server on.')):
             holder, check = _switch(title, about, name in chosen)
             check.toggled.connect(self._pages_edited)
             box.addWidget(holder)

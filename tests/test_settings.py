@@ -561,6 +561,8 @@ class PanelTests(_Controlled):
         self.assertTrue(self.panel._stats.isActive(), 'and once a second from then')
         self.assertEqual(self.panel.stat_rows['vram'].value, '2.0/12 GB')
         self.assertEqual(self.panel.stat_rows['gpu_temp'].value, '60°C')
+        self.assertFalse(self.panel.stat_rows['cpu_temp'].isVisibleTo(self.panel),
+                         'no processor temperature without LibreHardwareMonitor')
         self._wheel(1)
         self.assertEqual(pages.current, 2, 'no further than the last')
         self.panel.slide_away()
