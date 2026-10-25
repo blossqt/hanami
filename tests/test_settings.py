@@ -394,6 +394,24 @@ class PanelTests(_Controlled):
         self.rest_at(s.center().x(), s.center().y(), 0.7)
         self.assertFalse(self.panel.isVisible(), 'and goes once the pointer has left it')
 
+    def test_nothing_watched_over_a_game(self):
+        from unittest import mock
+        looked = []
+        with mock.patch.object(self.panel_module, 'pointer', lambda: looked.append(1) or self.point):
+            self.panel._tab_looked = 0.0
+            self.full_screen = True
+            self.panel._look()
+            self.assertEqual(self.panel._watch.interval(), self.panel_module.QUIET_EVERY, 'only now and then')
+            self.assertFalse(self.panel.tab.isVisible())
+            looked.clear()
+            for _ in range(5):
+                self.panel._look()
+            self.assertEqual(looked, [], 'the pointer is left alone')
+            self.full_screen = False
+            self.panel._look()
+            self.assertEqual(self.panel._watch.interval(), self.panel_module.WATCH_MS, 'watched again once it goes')
+            self.assertTrue(self.panel.tab.isVisible())
+
     def test_near_the_edge_will_do(self):
         s = self.screen
         self.rest_at(s.right() - self.panel_module.NEAR - 20, s.center().y(), 0.5)

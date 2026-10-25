@@ -7,8 +7,10 @@ games and anything else full screen (quiet), and of the panel itself while that 
 
 The pointer need not be right against the edge: anywhere within NEAR of it, beside where the panel
 sits, will do. Only an edge with no screen beyond it counts - passing through to another screen
-never brings the panel out - and the pointer has to stay a moment (DWELL), with no button held, and not over a game or anything else full screen (quiet, as Hanami says). It slides
-away once the pointer has left it for a moment (LEAVE), and after a choice in it.
+never brings the panel out - and the pointer has to stay a moment (DWELL), with no button held, and not over a game or anything else full screen (quiet, as Hanami says). While one
+of those is in front, the panel doesn't watch the pointer at all: it only looks, now and then
+(QUIET_EVERY), for it to go. It slides away once the pointer has left it for a moment (LEAVE), and
+after a choice in it.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ LEAVE = 0.45            # s after the pointer leaves it before it slides away
 WATCH_MS = 60
 TAB = 10, 76            # the tab's window, at the edge; its bar is narrower, a little in from the edge
 TAB_EVERY = 0.4         # s between looks at whether the tab should show, and where
+QUIET_EVERY = 1000      # ms between looks at whether a game, or anything full screen, has left the front
 EDGES = {'right': 'Right', 'left': 'Left'}
 
 
@@ -136,8 +139,10 @@ class _EdgeTab(QWidget):
         x = self.width() - width - 2 if self.edge == 'right' else 2
         bar = QRectF(x, 1, width, self.height() - 2)
         fill = QColor(theme.ACCENT)
-        fill.setAlpha(255 if lit else 200)
-        painter.setPen(QPen(c.edge, 1))
+        fill.setAlpha(255 if lit else 80)               # faint until the pointer comes to it
+        edge = QColor(c.edge)
+        edge.setAlphaF(edge.alphaF() * (1.0 if lit else 0.35))
+        painter.setPen(QPen(edge, 1))
         painter.setBrush(fill)
         painter.drawRoundedRect(bar, width / 2, width / 2)
         painter.end()
@@ -185,7 +190,7 @@ class _Handle(QWidget):
         painter.setPen(Qt.NoPen)
         held = self._hover or self._grab is not None
         color = QColor(c.text if held else c.dim)
-        color.setAlpha(160 if held else 70)            # faint until the pointer comes to it
+        color.setAlpha(230 if held else 170)
         painter.setBrush(color)
         grip = QRectF(0, 0, 30, 4)
         grip.moveCenter(QPointF(self.width() / 2, self.height() / 2))
@@ -302,6 +307,7 @@ class EdgePanel(QWidget):
         self.tab.dropped.connect(self._tab_dropped)
         self._tab_looked = 0.0
         self._tab_dragging = False
+        self._hushed = False            # a game, or anything full screen, in front: nothing watched
 
     # ------------------------------------------------------------------ what it holds
 
@@ -331,8 +337,8 @@ class EdgePanel(QWidget):
         self._tab_looked = 0.0
         if self.edge:
             self.tab.edge = self.edge
-            self._watch.start()
             self._show_tab()
+            self._watch.start()
         else:
             self._watch.stop()
             self.tab.hide()
@@ -351,10 +357,23 @@ class EdgePanel(QWidget):
         middle = screen.top() + self.place * screen.height()
         return round(max(screen.top() + MARGIN + height / 2, min(middle, screen.bottom() + 1 - MARGIN - height / 2)))
 
+    def _hush(self) -> bool:
+        """Whether a game, or anything full screen, is in front - and if that changed, the pointer
+        no longer watched (only, now and then, whether it is still in front), or watched again."""
+        quiet = self.quiet()
+        if quiet != self._hushed:
+            self._hushed = quiet
+            self._resting_since = None
+            self._watch.setInterval(QUIET_EVERY if quiet else WATCH_MS)
+            if quiet:
+                self.tab.hide()
+                self.slide_away()
+        return quiet
+
     def _show_tab(self) -> None:
         """The tab where the panel is - unless the panel is out, or something full screen is in front."""
         home = home_screen(self.edge) if self.edge else None
-        if home is None or self.isVisible() or self.quiet():
+        if self._hush() or home is None or self.isVisible():
             self.tab.hide()
             return
         x = home.right() + 1 - TAB[0] if self.edge == 'right' else home.left()
@@ -388,10 +407,15 @@ class EdgePanel(QWidget):
 
     def _look(self) -> None:
         now = time.monotonic()
-        point = pointer()
+        if self._hushed:                        # a game in front: only whether it has gone
+            self._show_tab()
+            return
         if not self._tab_dragging and now - self._tab_looked >= TAB_EVERY:
             self._tab_looked = now
             self._show_tab()
+            if self._hushed:
+                return
+        point = pointer()
         if self._dragging or self._tab_dragging:
             return
         if self.isVisible() and not self._leaving:
