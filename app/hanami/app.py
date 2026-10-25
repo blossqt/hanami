@@ -27,7 +27,7 @@ from PySide6.QtGui import QAction, QDesktopServices, QFont, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import APP_NAME, __version__, audio, catalog, installer, releases, sensors, suitelog, win32
+from . import APP_NAME, __version__, audio, brightness, catalog, installer, releases, sensors, suitelog, win32
 from .host import TrayHost
 from .hotkeys import Hotkeys, HotkeyError, normalize
 from .stats import Sampler
@@ -211,6 +211,15 @@ class Settings:
     def panel_pages(self, names: list[str]) -> None:
         self._store.setValue('panel/pages', json.dumps([name for name in PAGES if name in names]))
 
+    @property
+    def panel_brightness(self) -> bool:
+        """Whether the edge panel has a brightness slider for each monitor that has one."""
+        return str(self._store.value('panel/brightness', 'true')).lower() == 'true'
+
+    @panel_brightness.setter
+    def panel_brightness(self, on: bool) -> None:
+        self._store.setValue('panel/brightness', 'true' if on else 'false')
+
     def set_sound(self, on: bool, hotkey: str) -> None:
         self._store.setValue('sound/hotkey_on', 'true' if on else 'false')
         self._store.setValue('sound/hotkey', hotkey)
@@ -246,6 +255,7 @@ class _Bridge(QObject):
     prepared = Signal(str, object)            # name, the staged folder of a checked new version
     finished = Signal(str, object)            # name, files installed (list) or an error (str)
     sensors_done = Signal(str, str)           # Hanami Sensors' setup: what it was asked, what went wrong ('' if nothing)
+    monitors_found = Signal(object)           # the monitors with a brightness: [brightness.Monitor]
 
 
 class Controller(QObject):
@@ -272,6 +282,7 @@ class Controller(QObject):
         self._bridge.prepared.connect(self._job_prepared)
         self._bridge.finished.connect(self._job_finished)
         self._bridge.sensors_done.connect(self._sensors_done)
+        self._bridge.monitors_found.connect(self._monitors_found)
         self._held: list[tuple[str, str, QIcon]] = []     # notifications kept back while a game is in front
         self._make_tray()
         self._listen()
@@ -291,6 +302,13 @@ class Controller(QObject):
         self.panel.place = self.settings.panel_place
         self.panel.set_tab(*self.settings.panel_tab)
         self.panel.set_pages(self.settings.panel_pages)
+        self.monitors = brightness.Monitors(self._bridge.monitors_found.emit)
+        self._monitors: list | None = None          # as last found - None until they are
+        self.panel.brightness_set.connect(self.monitors.set)
+        self.panel.set_brightness_shown(self.settings.panel_brightness)
+        for change in (QApplication.instance().screenAdded, QApplication.instance().screenRemoved):
+            change.connect(lambda _: self._look_for_monitors())
+        self._look_for_monitors()
         self.panel.set_edge(self.settings.panel_edge)
         self._panel_icons: dict[str, tuple] = {}
         self.hotkeys = Hotkeys(self)
@@ -555,7 +573,25 @@ class Controller(QObject):
         if 'stats' in self.settings.panel_pages:
             self.sampler.prepare()                  # NVIDIA's driver, loaded only for the stats page
             self.sampler.sensors.wake()             # Hanami Sensors started now, ready by the time it is in sight
+        self._look_for_monitors()                   # each time: they may have been set by their own buttons
         QTimer.singleShot(0, self._update_sound)
+
+    def _look_for_monitors(self) -> None:
+        """Read the monitors' brightness, on brightness' own thread - not while a game is in front,
+        nor with the sliders off."""
+        if self.settings.panel_brightness and not theme.quiet_now():
+            self.monitors.look()
+
+    def _monitors_found(self, found: list) -> None:
+        self._monitors = found
+        self.panel.show_brightness(found)
+        if self.settings_window is not None:
+            self.settings_window.show_monitors([monitor.name for monitor in found])
+
+    def _brightness_changed(self, on: bool) -> None:
+        self.settings.panel_brightness = on
+        self.panel.set_brightness_shown(on)
+        self._look_for_monitors()
 
     def _pin_icon(self, pin: pins.Pin):
         """Something pinned's icon, for the panel - kept while it is pinned."""
@@ -1003,7 +1039,7 @@ class Controller(QObject):
             self.settings_window = SettingsWindow(s.start_with, win32.starts_with_windows(),
                                                   (s.check_updates, s.notify_updates, s.auto_update),
                                                   (s.sound_hotkey_on, s.sound_hotkey), s.panel_edge, s.panel_tab,
-                                                  s.pinned, s.panel_pages)
+                                                  s.pinned, s.panel_pages, s.panel_brightness)
             self.settings_window.startup_changed.connect(self._startup_changed)
             self.settings_window.sound_changed.connect(self._sound_changed)
             self.settings_window.output_chosen.connect(self._output_chosen)
@@ -1012,6 +1048,7 @@ class Controller(QObject):
             self.settings_window.pins_changed.connect(self._pins_changed)
             self.settings_window.pages_changed.connect(self._pages_changed)
             self.settings_window.sensors_asked.connect(self._sensors_asked)
+            self.settings_window.brightness_changed.connect(self._brightness_changed)
             self.settings_window.updates_changed.connect(self._updates_changed)
             self.settings_window.check_now.connect(self.check_releases)
             self.settings_window.show_page.connect(self.show_page)
@@ -1019,6 +1056,7 @@ class Controller(QObject):
         if page:
             self.settings_window.open_page(page)
         self.settings_window.show_sensors(sensors.state())
+        self.settings_window.show_monitors(None if self._monitors is None else [m.name for m in self._monitors])
         try:
             outputs = audio.outputs()
         except OSError:

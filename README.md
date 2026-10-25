@@ -87,9 +87,10 @@ out. Its pages turn with the scroll wheel, the dots along its bottom showing whi
 - **Stats**: the processor and memory, and, with an NVIDIA graphics card, its load, memory and
   temperature (read from NVIDIA's own `nvml.dll`), once a second while the page is in sight.
 
-Under every page, the sound output switch and a button muting the microphone. Settings > Edge
-panel chooses its edge, its pages, its tab, and the shortcuts. It keeps away from games and
-anything full screen.
+Under every page, a brightness slider for each monitor that has DDC/CI on (set over the cable,
+as the monitor's own buttons would), then the sound output switch and a button muting the
+microphone. Settings > Edge panel chooses its edge, its pages, the sliders, its tab, and the
+shortcuts. It keeps away from games and anything full screen.
 
 **The processor's temperature** comes from **Hanami Sensors** (`sensors\`): Windows gives no
 program a processor's temperature on most PCs; it takes a driver to read. Hanami Sensors is a

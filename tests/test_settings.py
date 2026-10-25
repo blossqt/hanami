@@ -135,12 +135,28 @@ class StartWithTests(unittest.TestCase):
                 settings.set_exe(name, '')
 
 
+class _Monitors:
+    """Stands in for brightness.Monitors: no real monitor is read, nor set, in these tests."""
+
+    def __init__(self, found):
+        self.found, self.looked, self.sent = found, 0, []
+
+    def look(self):
+        self.looked += 1
+
+    def set(self, key, percent):
+        self.sent.append((key, percent))
+
+
 class _Controlled(unittest.TestCase):
     """A Controller of the test's own, with nothing it would do by itself, and the suite's choices
     in a throwaway registry key."""
 
     def setUp(self):
+        from unittest import mock
         from hanami.ui import suitetheme
+        self._monitors = mock.patch.object(hanami.brightness, 'Monitors', _Monitors)
+        self._monitors.start()
         self.suitetheme = suitetheme
         self._key = suitetheme._LOOK_KEY
         suitetheme._LOOK_KEY = r'Software\blossqt\SuiteSettingsTest'
@@ -157,6 +173,7 @@ class _Controlled(unittest.TestCase):
         import winreg
         self.controller.hotkeys.clear()
         self.controller._server.close()
+        self._monitors.stop()
         hanami.DEV = self._dev
         for name, original in self._originals.items():
             setattr(hanami.Controller, name, original)
@@ -668,6 +685,59 @@ class PanelTests(_Controlled):
             self.assertFalse(window.sensors_problem.isHidden())
         finally:
             window.close()
+
+    def test_brightness(self):
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+        from hanami.brightness import Monitor
+        monitors, s = self.controller.monitors, self.screen
+        looked = monitors.looked
+        self._open()
+        self.assertEqual(monitors.looked, looked + 1, 'looked at again as the panel comes out')
+        self.controller._monitors_found([Monitor('a', 'TYPEC', 40), Monitor('b', 'DELL G2524H', 75)])
+        rows = self.panel.brightness_rows
+        self.assertEqual([(row.name, row.value) for row in rows], [('TYPEC', 40), ('DELL G2524H', 75)])
+        self.assertTrue(self.panel.screens.isVisibleTo(self.panel))
+        row, track = rows[1], rows[1]._track()
+        y = round(track.center().y())
+        QTest.mousePress(row, Qt.LeftButton, Qt.NoModifier, QPoint(round(track.left() + track.width() / 4), y))
+        QTest.mouseMove(row, QPoint(round(track.center().x()), y))
+        self.assertEqual(monitors.sent, [('b', 25), ('b', 50)], 'set as it goes')
+        self.controller._monitors_found([Monitor('a', 'TYPEC', 40), Monitor('b', 'DELL G2524H', 75)])
+        self.assertEqual(row.value, 50, 'a reading from before doesn’t move it back')
+        self.assertIs(self.panel.brightness_rows[1], row, 'the same monitors: the same sliders')
+        self.rest_at(s.center().x(), s.center().y(), 0.7)
+        self.assertTrue(self.panel.isVisible(), 'dragged past its edge, a slider holds it out')
+        QTest.mouseRelease(row, Qt.LeftButton, Qt.NoModifier, QPoint(round(track.center().x()), y))
+        self.rest_at(s.center().x(), s.center().y(), 0.7)
+        self.assertFalse(self.panel.isVisible(), 'and once let go, it goes')
+        self.controller._brightness_changed(False)
+        self.assertFalse(self.panel.screens.isVisibleTo(self.panel))
+        self.assertFalse(self.controller.settings.panel_brightness, 'kept')
+        looked = monitors.looked
+        self._open()
+        self.assertEqual(monitors.looked, looked, 'off: not looked at')
+        self.controller._brightness_changed(True)
+        self.controller._monitors_found([])
+        self.assertFalse(self.panel.screens.isVisibleTo(self.panel), 'no monitor answers: no sliders')
+        window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY), 'right')
+        window.brightness_changed.connect(self.controller._brightness_changed)
+        try:
+            window.show_monitors(None)
+            self.assertEqual(window.monitors_found.text(), 'Looking for monitors…')
+            window.show_monitors(['TYPEC', 'DELL G2524H'])
+            self.assertEqual(window.monitors_found.text(), 'Found: TYPEC, DELL G2524H.')
+            window.show_monitors([])
+            self.assertEqual(window.monitors_found.text(), 'No monitor here answers DDC/CI.')
+            window.brightness_switch.setChecked(False)
+            self.assertFalse(self.controller.settings.panel_brightness)
+            self.assertTrue(window.monitors_found.isHidden())
+            window.brightness_switch.setChecked(True)
+            window.panel_on.setChecked(False)
+            self.assertFalse(window.brightness_switch.isEnabled(), 'nothing to choose with the panel off')
+        finally:
+            window.close()
+            self.controller._brightness_changed(True)
 
     def test_the_sound_button_asks_for_the_other(self):
         from hanami.ui.sound import SoundToggle

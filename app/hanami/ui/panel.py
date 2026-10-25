@@ -2,8 +2,8 @@
 of glass slides out there over a photo of blossom. It has three pages, turned with the scroll wheel
 (or the dots along its bottom, showing which is in sight): the suite's apps, what is pinned to it
 in Settings (programs, files, folders, websites), and how busy the PC is (stats.py) - sampled once a
-second only while that page is in sight. Under them, on every page, the sound button and the
-microphone's mute button.
+second only while that page is in sight. Under them, on every page, a brightness slider for each
+monitor that has one (brightness.py), then the sound button and the microphone's mute button.
 
 The tab shows where the panel is, as Samsung's edge panel's does. It sits in the middle of the edge
 until it is moved - the tab dragged up or down, or the handle along the panel's top (place: where
@@ -44,7 +44,9 @@ PAGES = ('apps', 'pinned', 'stats')    # the Hanami suite, shortcuts, stats: tho
 STATS_EVERY = 1000      # ms between samples, while the stats page is in sight
 STATS_QUICK = 250, 2.0  # ms between samples, for the first s of it: so the processor's temperature
                         # shows as soon as Hanami Sensors has it, when it has just been started
-MARGIN = 10             # between the panel and the screen's edge
+SET_HELD = 2.0          # s after a brightness slider is moved during which a reading doesn't move it back
+                        # (the reading may be from before)
+MARGIN = 10            # between the panel and the screen's edge
 NEAR = 48               # px in from the screen's edge that count as at it
 DWELL = 0.3             # s the pointer rests at the edge before the panel comes out
 LEAVE = 0.45            # s after the pointer leaves it before it slides away
@@ -372,6 +374,94 @@ class _Stat(QWidget):
         painter.end()
 
 
+class _Brightness(QWidget):
+    """A monitor's brightness: its name and how bright on a line, as the stats are, and under them a
+    slider - dragged, or clicked along, it sets it as it goes."""
+    changed = Signal(str, int)          # the monitor's key, its brightness (%)
+
+    def __init__(self, key: str, name: str, value: int):
+        super().__init__()
+        self.key, self.name, self.value = key, name, value
+        self.held = False
+        self.set_at = 0.0               # when it was last moved here
+        self._hover = False
+        self.setFixedSize(INNER, 32)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAccessibleName(f'{name} brightness')
+        self.setAccessibleDescription(f'{value}%')
+
+    def show_value(self, value: int) -> None:
+        """The monitor's brightness as read - unless it is being moved here, or just was."""
+        if self.held or time.monotonic() - self.set_at < SET_HELD:
+            return
+        self.value = value
+        self.setAccessibleDescription(f'{value}%')
+        self.update()
+
+    def _track(self) -> QRectF:
+        return QRectF(6, 23, self.width() - 12, 5)          # room for the knob at both ends
+
+    def _move(self, x: float) -> None:
+        track = self._track()
+        value = round(max(0.0, min(1.0, (x - track.left()) / track.width())) * 100)
+        self.set_at = time.monotonic()
+        if value != self.value:
+            self.value = value
+            self.setAccessibleDescription(f'{value}%')
+            self.update()
+            self.changed.emit(self.key, value)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.held = True
+            self._move(event.position().x())
+
+    def mouseMoveEvent(self, event):
+        if self.held:
+            self._move(event.position().x())
+
+    def mouseReleaseEvent(self, event):
+        if self.held and event.button() == Qt.LeftButton:
+            self._move(event.position().x())
+            self.held = False
+            self.update()
+
+    def enterEvent(self, event):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self.update()
+
+    def paintEvent(self, event):
+        c = theme.colors()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        line = QRectF(0, 0, self.width(), 18)
+        painter.setFont(theme.font(8.5))
+        painter.setPen(c.dim)
+        room, name = self.width() - 34, self.name
+        if painter.fontMetrics().horizontalAdvance(name) > room and ' ' in name.strip():
+            name = name.strip().split(' ', 1)[1]           # "DELL G2524H": the model says which
+        painter.drawText(line.adjusted(0, 0, -34, 0), Qt.AlignLeft | Qt.AlignVCenter | Qt.TextSingleLine,
+                         painter.fontMetrics().elidedText(name, Qt.ElideRight, room))
+        painter.setFont(theme.font(9.5, QFont.DemiBold))
+        painter.setPen(c.text)
+        painter.drawText(line, Qt.AlignRight | Qt.AlignVCenter, f'{self.value}%')
+        track = self._track()
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(c.border)
+        painter.drawRoundedRect(track, 2.5, 2.5)
+        at = track.left() + track.width() * self.value / 100
+        painter.setBrush(QColor(theme.ACCENT))
+        painter.drawRoundedRect(QRectF(track.left(), track.top(), max(5.0, at - track.left()), 5), 2.5, 2.5)
+        knob = 6.5 if self.held or self._hover else 5.5
+        painter.setPen(QPen(c.edge, 1))
+        painter.drawEllipse(QPointF(at, track.center().y()), knob, knob)
+        painter.end()
+
+
 class _Pages(QWidget):
     """The panel's pages, side by side: one in sight, the next sliding in from beside it - only
     those turned on (shown: their indexes, in order). As big as the biggest of them, so the panel
@@ -518,7 +608,8 @@ class EdgePanel(QWidget):
     open_pin = Signal(int)              # what is pinned, by its place on the page
     add_pins = Signal()                 # the plus after them: to Settings, to pin something
     mic_clicked = Signal()
-    moved = Signal(float)               # dropped by its handle: where along the edge it is now (place)
+    brightness_set = Signal(str, int)   # a monitor's key, its brightness (%) - as its slider moves
+    moved = Signal(float)              # dropped by its handle: where along the edge it is now (place)
     output_clicked = Signal(str)        # 'speakers' or 'headphones'
     showing = Signal()                  # about to come out: the apps and the sound, as they are now
 
@@ -584,6 +675,14 @@ class EdgePanel(QWidget):
         self.pages.add(stats_page)
         self.pages.changed.connect(self._page_turned)
         layout.addWidget(self.pages)
+        self.screens = QWidget()                    # a brightness slider for each monitor that has one
+        self._screens = QVBoxLayout(self.screens)
+        self._screens.setContentsMargins(0, 0, 0, 0)
+        self._screens.setSpacing(4)
+        self.screens.hide()
+        self.brightness_rows: list[_Brightness] = []
+        self._brightness_on = True
+        layout.addWidget(self.screens)
         row = QHBoxLayout()
         row.setSpacing(6)
         row.addStretch(1)
@@ -652,6 +751,32 @@ class EdgePanel(QWidget):
         for index, button in enumerate(self.pin_buttons):
             self._pins.addWidget(button, index // 2, index % 2)
         self.pages.refit()
+        self.adjustSize()
+
+    def show_brightness(self, monitors: list) -> None:
+        """The monitors that have a brightness (brightness.Monitor), as read: their sliders made
+        again only when the monitors themselves change."""
+        if [(row.key, row.name) for row in self.brightness_rows] == [(m.key, m.name) for m in monitors]:
+            for row, monitor in zip(self.brightness_rows, monitors):
+                row.show_value(monitor.value)
+            return
+        for row in self.brightness_rows:
+            self._screens.removeWidget(row)
+            row.hide()
+            row.deleteLater()
+        self.brightness_rows = []
+        for monitor in monitors:
+            row = _Brightness(monitor.key, monitor.name, monitor.value)
+            row.changed.connect(self.brightness_set)
+            self.brightness_rows.append(row)
+            self._screens.addWidget(row)
+        self.screens.setVisible(self._brightness_on and bool(monitors))
+        self.adjustSize()
+
+    def set_brightness_shown(self, on: bool) -> None:
+        """Whether it has the brightness sliders (Settings)."""
+        self._brightness_on = on
+        self.screens.setVisible(on and bool(self.brightness_rows))
         self.adjustSize()
 
     def show_mic(self, muted: bool | None) -> None:
@@ -841,7 +966,8 @@ class EdgePanel(QWidget):
             return
         if self.isVisible() and not self._leaving:
             near = self.frameGeometry().adjusted(-24, -24, 24, 24)
-            if near.contains(point) or at_edge(point, self.edge) is not None:
+            sliding = any(row.held for row in self.brightness_rows)     # dragged past its edge, a slider still holds it
+            if sliding or near.contains(point) or at_edge(point, self.edge) is not None:
                 self._left_at = None
             elif self._left_at is None:
                 self._left_at = now

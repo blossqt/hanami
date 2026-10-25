@@ -348,6 +348,7 @@ class SettingsWindow(QWidget):
     pins_changed = Signal(list)                     # the panel's shortcuts: [pins.Pin]
     pages_changed = Signal(list)                    # the panel's pages: names from panel.PAGES, in order
     sensors_asked = Signal(str)                     # Hanami Sensors: '--install' (or update) or '--uninstall'
+    brightness_changed = Signal(bool)               # the panel's brightness sliders: on or off
     check_now = Signal()
     show_page = Signal(str)
     open_url = Signal(str)
@@ -358,7 +359,7 @@ class SettingsWindow(QWidget):
     def __init__(self, start_with: list[str], starts_with_windows: bool, updates: tuple[bool, bool, bool],
                  sound: tuple[bool, str] = (True, ''), panel_edge: str = 'right',
                  tab: tuple[int, int, int] | None = None, pinned: list | None = None,
-                 panel_pages: list[str] | None = None):
+                 panel_pages: list[str] | None = None, brightness_on: bool = True):
         super().__init__()
         self.setWindowTitle('Hanami settings')
         self.setWindowIcon(icons.app_icon())
@@ -384,7 +385,8 @@ class SettingsWindow(QWidget):
         outer.addLayout(side)
         self.pages = QStackedWidget()
         self.pages.addWidget(self._general(start_with, starts_with_windows))
-        self.pages.addWidget(self._scrolled(self._edge_panel(panel_edge, tab, list(pinned or []), panel_pages)))
+        self.pages.addWidget(self._scrolled(self._edge_panel(panel_edge, tab, list(pinned or []), panel_pages,
+                                                                    brightness_on)))
         self.pages.addWidget(self._appearance())
         self.pages.addWidget(self._games())
         self.pages.addWidget(self._sound(*sound))
@@ -457,7 +459,7 @@ class SettingsWindow(QWidget):
         return area
 
     def _edge_panel(self, panel_edge: str, tab: tuple[int, int, int] | None, pinned: list,
-                    panel_pages: list[str] | None = None) -> QWidget:
+                    panel_pages: list[str] | None = None, brightness_on: bool = True) -> QWidget:
         from .panel import PAGES, TAB_LIMITS, TAB_LOOK          # (the panel's sound switch is drawn from here)
         page, layout = self._page('Edge panel', '')
         frame, box = _section('Edge panel')
@@ -496,6 +498,18 @@ class SettingsWindow(QWidget):
             check.toggled.connect(self._pages_edited)
             box.addWidget(holder)
             self.page_switches[name] = check
+        layout.addWidget(frame)
+        frame, box = _section('Brightness')
+        holder, self.brightness_switch = _switch('Monitor brightness', 'A slider for each monitor, under the pages. '
+                                                 'A monitor has one only with DDC/CI on in its own menu.',
+                                                 brightness_on)
+        self.brightness_switch.toggled.connect(self.brightness_changed)
+        box.addWidget(holder)
+        self.monitors_found = _label('Looking for monitors…', 9, role='dim', wrap=True)
+        _indent(self.monitors_found)
+        self.monitors_found.setVisible(brightness_on)
+        self.brightness_switch.toggled.connect(self.monitors_found.setVisible)
+        box.addWidget(self.monitors_found)
         layout.addWidget(frame)
         frame, box = _section('CPU temperature')
         box.addWidget(_label('Windows doesn’t give apps the processor’s temperature. Hanami Sensors reads it '
@@ -804,7 +818,7 @@ class SettingsWindow(QWidget):
 
     def _panel_edited(self, *_, emit: bool = True) -> None:
         on = self.panel_on.isChecked()
-        for button in [*self.edge_buttons.values(), *self.tab_sliders.values()]:
+        for button in [*self.edge_buttons.values(), *self.tab_sliders.values(), self.brightness_switch]:
             button.setEnabled(on)
         if hasattr(self, 'pin_note'):
             self._show_pinned(self.pin_note.text() if self.pin_note.isVisible() else '')
@@ -841,6 +855,16 @@ class SettingsWindow(QWidget):
         remove.setEnabled(not busy)
         self.sensors_problem.setText(problem)
         self.sensors_problem.setVisible(bool(problem))
+
+    def show_monitors(self, names: list[str] | None) -> None:
+        """The monitors with a brightness to set, by name - None while they are still being looked for."""
+        if names is None:
+            text = 'Looking for monitors…'
+        elif names:
+            text = 'Found: ' + ', '.join(names) + '.'
+        else:
+            text = 'No monitor here answers DDC/CI.'
+        self.monitors_found.setText(text)
 
     def _pages_edited(self, *_, emit: bool = True) -> None:
         """The panel's pages: at least one stays - the last one on can't be turned off."""
