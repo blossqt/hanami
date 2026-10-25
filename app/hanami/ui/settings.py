@@ -13,8 +13,8 @@ from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAni
 from PySide6.QtGui import (QColor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
                            QRadialGradient)
 from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QCheckBox, QComboBox, QFrame, QGridLayout,
-                               QHBoxLayout, QKeySequenceEdit, QLabel, QPushButton, QStackedWidget, QVBoxLayout,
-                               QWidget)
+                               QHBoxLayout, QKeySequenceEdit, QLabel, QPushButton, QSlider, QStackedWidget,
+                               QVBoxLayout, QWidget)
 
 from .. import __version__
 from ..catalog import SUITE
@@ -340,6 +340,7 @@ class SettingsWindow(QWidget):
     sound_changed = Signal(bool, str)               # the hotkey on, the hotkey
     output_chosen = Signal(str, str, str)           # 'speakers' or 'headphones', the output's id ('' for none), its name
     panel_changed = Signal(str)                     # the edge the panel slides out at: 'right', 'left' or '' (off)
+    tab_changed = Signal(int, int, int)             # the panel's tab: its length and thickness (px), opacity at rest (%)
     check_now = Signal()
     show_page = Signal(str)
     open_url = Signal(str)
@@ -348,7 +349,8 @@ class SettingsWindow(QWidget):
              ('', 'About')]
 
     def __init__(self, start_with: list[str], starts_with_windows: bool, updates: tuple[bool, bool, bool],
-                 sound: tuple[bool, str] = (True, ''), panel_edge: str = 'right'):
+                 sound: tuple[bool, str] = (True, ''), panel_edge: str = 'right',
+                 tab: tuple[int, int, int] | None = None):
         super().__init__()
         self.setWindowTitle('Hanami settings')
         self.setWindowIcon(icons.app_icon())
@@ -373,7 +375,7 @@ class SettingsWindow(QWidget):
         side.addStretch(1)
         outer.addLayout(side)
         self.pages = QStackedWidget()
-        self.pages.addWidget(self._general(start_with, starts_with_windows, panel_edge))
+        self.pages.addWidget(self._general(start_with, starts_with_windows, panel_edge, tab))
         self.pages.addWidget(self._appearance())
         self.pages.addWidget(self._games())
         self.pages.addWidget(self._sound(*sound))
@@ -402,7 +404,9 @@ class SettingsWindow(QWidget):
             layout.addWidget(_label(about, 9, role='dim', wrap=True))
         return page, layout
 
-    def _general(self, start_with: list[str], starts_with_windows: bool, panel_edge: str = 'right') -> QWidget:
+    def _general(self, start_with: list[str], starts_with_windows: bool, panel_edge: str = 'right',
+                 tab: tuple[int, int, int] | None = None) -> QWidget:
+        from .panel import TAB_LIMITS, TAB_LOOK          # (the panel's sound switch is drawn from here)
         page, layout = self._page('General', '')
         frame, box = _section('Starting up')
         holder, self.startup = _switch('Start Hanami when I sign in to Windows',
@@ -450,6 +454,29 @@ class SettingsWindow(QWidget):
             row.addWidget(button)
         row.addStretch(1)
         box.addLayout(row)
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 4, 0, 0)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(6)
+        self.tab_sliders: dict[str, QSlider] = {}
+        for index, (name, title, unit, value, (least, most)) in enumerate(zip(
+                ('length', 'thickness', 'opacity'), ('Tab length', 'Tab thickness', 'Tab opacity'),
+                (' px', ' px', '%'), tab or TAB_LOOK, TAB_LIMITS)):
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(least, most)
+            slider.setValue(value)
+            slider.setCursor(Qt.PointingHandCursor)
+            slider.setAccessibleName(title)
+            shown = _label(f'{value}{unit}', 9.5, role='dim')
+            shown.setMinimumWidth(48)
+            slider.valueChanged.connect(lambda v, shown=shown, unit=unit: (shown.setText(f'{v}{unit}'),
+                                                                           self._tab_edited()))
+            grid.addWidget(_label(title, 9.5), index, 0)
+            grid.addWidget(slider, index, 1)
+            grid.addWidget(shown, index, 2)
+            self.tab_sliders[name] = slider
+        grid.setColumnStretch(1, 1)
+        box.addLayout(grid)
         self._panel_edited(emit=False)
         layout.addWidget(frame)
         frame, box = _section('The tray')
@@ -685,11 +712,15 @@ class SettingsWindow(QWidget):
 
     def _panel_edited(self, *_, emit: bool = True) -> None:
         on = self.panel_on.isChecked()
-        for button in self.edge_buttons.values():
+        for button in [*self.edge_buttons.values(), *self.tab_sliders.values()]:
             button.setEnabled(on)
         edge = next((name for name, button in self.edge_buttons.items() if button.isChecked()), 'right')
         if emit:
             self.panel_changed.emit(edge if on else '')
+
+    def _tab_edited(self) -> None:
+        s = self.tab_sliders
+        self.tab_changed.emit(s['length'].value(), s['thickness'].value(), s['opacity'].value())
 
     def _sound_edited(self, *_) -> None:
         keys = self.sound_key.keySequence()
@@ -743,4 +774,12 @@ class SettingsWindow(QWidget):
         return theme.card_style() + theme.panel_css('QFrame#section', 12) + f"""
             QWidget#settings {{ background: {theme.css(c.card)}; }}
             QStackedWidget, QStackedWidget > QWidget {{ background: transparent; }}
+            QSlider {{ min-height: 22px; background: transparent; }}
+            QSlider::groove:horizontal {{ height: 4px; border-radius: 2px; background: {theme.css(c.border)}; }}
+            QSlider::sub-page:horizontal {{ height: 4px; border-radius: 2px; background: {theme.ACCENT}; }}
+            QSlider::handle:horizontal {{ width: 16px; height: 16px; margin: -6px 0; border-radius: 8px;
+                                          background: {theme.ACCENT}; border: 1px solid {theme.ink()}; }}
+            QSlider::handle:horizontal:hover {{ background: {theme.ACCENT_HOVER}; }}
+            QSlider::sub-page:horizontal:disabled, QSlider::handle:horizontal:disabled {{
+                background: {theme.css(c.border)}; border-color: {theme.css(c.border)}; }}
         """

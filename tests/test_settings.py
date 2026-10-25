@@ -489,6 +489,32 @@ class PanelTests(_Controlled):
         self.rest_at(s.center().x(), s.center().y(), 0.7)
         self.assertFalse(self.panel.isVisible(), 'and goes, once let go and left')
 
+    def test_the_tabs_look_is_chosen_in_settings(self):
+        s, tab = self.screen, self.panel.tab
+        self.assertEqual(self.controller.settings.panel_tab, self.panel_module.TAB_LOOK, 'as it comes')
+        window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY), 'right',
+                                self.controller.settings.panel_tab)
+        window.tab_changed.connect(self.controller._tab_changed)
+        try:
+            self.panel._show_tab()
+            window.tab_sliders['length'].setValue(160)
+            window.tab_sliders['thickness'].setValue(9)
+            window.tab_sliders['opacity'].setValue(60)
+            self.assertEqual(self.controller.settings.panel_tab, (160, 9, 60), 'kept')
+            self.assertEqual(tab.height(), 160, 'shown at once')
+            self.assertEqual((tab.thickness, tab.opacity), (9, 60))
+            g = tab.frameGeometry()
+            self.assertEqual(g.right(), s.right(), 'still against the edge')
+            self.assertAlmostEqual(g.center().y(), s.center().y(), delta=2, msg='and where it was along it')
+            window.panel_on.setChecked(False)
+            self.assertFalse(window.tab_sliders['length'].isEnabled(), 'nothing to choose with the panel off')
+        finally:
+            window.close()
+            self.controller._tab_changed(*self.panel_module.TAB_LOOK)
+        self.controller.settings._store.setValue('panel/tab_length', 9999)
+        self.assertEqual(self.controller.settings.panel_tab[0], self.panel_module.TAB_LIMITS[0][1], 'within limits')
+        self.controller.settings.panel_tab = self.panel_module.TAB_LOOK
+
     def test_turned_off_or_moved_in_settings(self):
         window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY), 'right')
         window.panel_changed.connect(self.controller._panel_changed)

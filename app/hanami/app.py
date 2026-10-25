@@ -31,7 +31,7 @@ from .host import TrayHost
 from .hotkeys import Hotkeys, HotkeyError, normalize
 from .ui import icons, theme
 from .ui.launcher import CardState, LauncherWindow, placeholder_icon
-from .ui.panel import EdgePanel
+from .ui.panel import TAB_LIMITS, TAB_LOOK, EdgePanel
 from .ui.settings import SettingsWindow
 from .ui.sound import HEADPHONES, SPEAKER, SoundPopup, sounds_like_headphones
 
@@ -165,6 +165,22 @@ class Settings:
     def panel_place(self, place: float) -> None:
         self._store.setValue('panel/place', round(place, 4))
 
+    @property
+    def panel_tab(self) -> tuple[int, int, int]:
+        """The edge panel's tab: its length and thickness (px), and how opaque it is at rest (%)."""
+        look = []
+        for name, default, (least, most) in zip(('length', 'thickness', 'opacity'), TAB_LOOK, TAB_LIMITS):
+            try:
+                look.append(max(least, min(most, int(self._store.value(f'panel/tab_{name}', default)))))
+            except (TypeError, ValueError):
+                look.append(default)
+        return tuple(look)
+
+    @panel_tab.setter
+    def panel_tab(self, look: tuple[int, int, int]) -> None:
+        for name, value in zip(('length', 'thickness', 'opacity'), look):
+            self._store.setValue(f'panel/tab_{name}', int(value))
+
     def set_sound(self, on: bool, hotkey: str) -> None:
         self._store.setValue('sound/hotkey_on', 'true' if on else 'false')
         self._store.setValue('sound/hotkey', hotkey)
@@ -235,6 +251,7 @@ class Controller(QObject):
         self.panel.showing.connect(self._fill_panel)
         self.panel.moved.connect(lambda place: setattr(self.settings, 'panel_place', place))
         self.panel.place = self.settings.panel_place
+        self.panel.set_tab(*self.settings.panel_tab)
         self.panel.set_edge(self.settings.panel_edge)
         self._panel_icons: dict[str, tuple] = {}
         self.hotkeys = Hotkeys(self)
@@ -501,6 +518,10 @@ class Controller(QObject):
     def _panel_changed(self, edge: str) -> None:
         self.settings.panel_edge = edge
         self.panel.set_edge(edge)
+
+    def _tab_changed(self, length: int, thickness: int, opacity: int) -> None:
+        self.settings.panel_tab = length, thickness, opacity
+        self.panel.set_tab(length, thickness, opacity)
 
     def _output_chosen(self, which: str, output_id: str, name: str) -> None:
         self.settings.set_output(which, output_id, name)
@@ -880,11 +901,12 @@ class Controller(QObject):
             s = self.settings
             self.settings_window = SettingsWindow(s.start_with, win32.starts_with_windows(),
                                                   (s.check_updates, s.notify_updates, s.auto_update),
-                                                  (s.sound_hotkey_on, s.sound_hotkey), s.panel_edge)
+                                                  (s.sound_hotkey_on, s.sound_hotkey), s.panel_edge, s.panel_tab)
             self.settings_window.startup_changed.connect(self._startup_changed)
             self.settings_window.sound_changed.connect(self._sound_changed)
             self.settings_window.output_chosen.connect(self._output_chosen)
             self.settings_window.panel_changed.connect(self._panel_changed)
+            self.settings_window.tab_changed.connect(self._tab_changed)
             self.settings_window.updates_changed.connect(self._updates_changed)
             self.settings_window.check_now.connect(self.check_releases)
             self.settings_window.show_page.connect(self.show_page)

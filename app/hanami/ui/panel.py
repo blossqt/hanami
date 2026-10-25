@@ -35,7 +35,8 @@ NEAR = 48               # px in from the screen's edge that count as at it
 DWELL = 0.3             # s the pointer rests at the edge before the panel comes out
 LEAVE = 0.45            # s after the pointer leaves it before it slides away
 WATCH_MS = 60
-TAB = 10, 76            # the tab's window, at the edge; its bar is narrower, a little in from the edge
+TAB_LOOK = 76, 5, 30    # the tab as it comes: its length and thickness (px), how opaque at rest (%)
+TAB_LIMITS = (40, 240), (3, 12), (10, 100)
 TAB_EVERY = 0.4         # s between looks at whether the tab should show, and where
 QUIET_EVERY = 1000      # ms between looks at whether a game, or anything full screen, has left the front
 EDGES = {'right': 'Right', 'left': 'Left'}
@@ -90,13 +91,21 @@ class _EdgeTab(QWidget):
                          | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.setFixedSize(*TAB)
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip('Hanami - click, or drag to move')
         self.edge = 'right'
         self._press: float | None = None
         self._moving = False
         self._hover = False
+        self.set_look(*TAB_LOOK)
+
+    def set_look(self, length: int, thickness: int, opacity: int) -> None:
+        """Its length and its bar's thickness (px), and how opaque it is at rest (%) - full, and
+        a little thicker, while the pointer is on it. Its window leaves the bar room to thicken,
+        and a little gap at the screen's edge."""
+        self.thickness, self.opacity = thickness, opacity
+        self.setFixedSize(thickness + 5, length)
+        self.update()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -135,13 +144,14 @@ class _EdgeTab(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         lit = self._hover or self._moving
-        width = 7 if lit else 5
+        width = self.thickness + 2 if lit else self.thickness
         x = self.width() - width - 2 if self.edge == 'right' else 2
         bar = QRectF(x, 1, width, self.height() - 2)
+        share = 1.0 if lit else self.opacity / 100
         fill = QColor(theme.ACCENT)
-        fill.setAlpha(255 if lit else 80)               # faint until the pointer comes to it
+        fill.setAlphaF(share)
         edge = QColor(c.edge)
-        edge.setAlphaF(edge.alphaF() * (1.0 if lit else 0.35))
+        edge.setAlphaF(edge.alphaF() * share)
         painter.setPen(QPen(edge, 1))
         painter.setBrush(fill)
         painter.drawRoundedRect(bar, width / 2, width / 2)
@@ -330,6 +340,12 @@ class EdgePanel(QWidget):
 
     # ------------------------------------------------------------------ the edge
 
+    def set_tab(self, length: int, thickness: int, opacity: int) -> None:
+        """The tab's look (_EdgeTab.set_look), shown at once where it is."""
+        self.tab.set_look(length, thickness, opacity)
+        if self.edge and not self._tab_dragging:
+            self._show_tab()
+
     def set_edge(self, edge: str | None) -> None:
         """Watch that edge of the screen ('left' or 'right'), or none."""
         self.edge = edge if edge in EDGES else None
@@ -376,8 +392,8 @@ class EdgePanel(QWidget):
         if self._hush() or home is None or self.isVisible():
             self.tab.hide()
             return
-        x = home.right() + 1 - TAB[0] if self.edge == 'right' else home.left()
-        place = QPoint(x, self._middle(home, TAB[1]) - TAB[1] // 2)
+        x = home.right() + 1 - self.tab.width() if self.edge == 'right' else home.left()
+        place = QPoint(x, self._middle(home, self.tab.height()) - self.tab.height() // 2)
         if self.tab.pos() != place:
             self.tab.move(place)
         if not self.tab.isVisible():
@@ -394,7 +410,8 @@ class EdgePanel(QWidget):
             return
         self._tab_dragging = True
         self._resting_since = None
-        top = max(home.top() + MARGIN, min(middle - TAB[1] // 2, home.bottom() + 1 - MARGIN - TAB[1]))
+        length = self.tab.height()
+        top = max(home.top() + MARGIN, min(middle - length // 2, home.bottom() + 1 - MARGIN - length))
         self.tab.move(self.tab.x(), top)
 
     def _tab_dropped(self) -> None:
@@ -402,7 +419,7 @@ class EdgePanel(QWidget):
         home = home_screen(self.edge) if self.edge else None
         if home is None:
             return
-        self.place = max(0.0, min(1.0, (self.tab.y() + TAB[1] / 2 - home.top()) / home.height()))
+        self.place = max(0.0, min(1.0, (self.tab.y() + self.tab.height() / 2 - home.top()) / home.height()))
         self.moved.emit(self.place)
 
     def _look(self) -> None:
@@ -452,8 +469,8 @@ class EdgePanel(QWidget):
         around the tab - a fifth of the screen's height at least, so it is easy to hit."""
         height = self._height(screen)
         top = self._top(screen, height)
-        tab = self._middle(screen, TAB[1])
-        reach = max(TAB[1] + 40, screen.height() // 5) / 2
+        tab = self._middle(screen, self.tab.height())
+        reach = max(self.tab.height() + 40, screen.height() // 5) / 2
         return round(min(top, tab - reach)), round(max(top + height, tab + reach))
 
     def _places(self, screen: QRect) -> tuple[QPoint, QPoint]:

@@ -277,6 +277,29 @@ class LensTests(unittest.TestCase):
         at_edge = suitetheme._heal(shot, [QRect(0, 0, 16, 80)])
         self.assertEqual(at_edge.pixelColor(8, 40).name(), '#00ff00', 'from the one side it has')
 
+    def test_a_pop_ups_own_place_in_a_shot_is_filled_in_from_its_last_clean_one(self):
+        from PySide6.QtGui import QImage
+        before = QImage(300, 200, QImage.Format_RGB32)
+        before.fill(QColor('#00ff00'))                                     # behind it, before it opened
+        shot = QImage(300, 200, QImage.Format_RGB32)
+        shot.fill(QColor('#00ff00'))
+        painter = QPainter(shot)
+        painter.fillRect(110, 60, 80, 60, QColor('#ff0000'))               # the pop-up, caught in the shot
+        painter.fillRect(0, 0, 20, 200, QColor('#0000ff'))                 # something new beside it
+        painter.end()
+        want = QRect(1000, 500, 300, 200)
+        covered = QRect(1110, 560, 80, 60).adjusted(-suitetheme._SHADOW, -suitetheme._SHADOW,
+                                                     suitetheme._SHADOW, suitetheme._SHADOW)
+        for before_at in (QPoint(1000, 500), QPoint(960, 480)):           # the last one, where it was
+            clean = suitetheme._clean(QImage(shot), want, want, covered=covered, before=before, before_at=before_at)
+            self.assertEqual(clean.pixelColor(150, 90).name(), '#00ff00', 'none of the pop-up in it')
+            self.assertEqual(clean.pixelColor(10, 100).name(), '#0000ff', 'what changed around it, as it is now')
+
+    def test_no_window_is_ever_left_out_of_captures(self):
+        # With one left out (SetWindowDisplayAffinity), NVIDIA's desktop recording stops altogether.
+        source = Path(suitetheme.__file__).read_text(encoding='utf-8')
+        self.assertNotIn('SetWindowDisplayAffinity(', source)
+
     def test_a_pop_ups_shot_reaches_further_than_a_windows(self):
         popup = QWidget(None, Qt.FramelessWindowHint | Qt.Tool)
         popup.setGeometry(400, 300, 200, 120)
@@ -481,6 +504,7 @@ class MotionTests(unittest.TestCase):
             animation.start()
             loop.exec()
             return count[0]
+        suitetheme._honour_timers()             # as install() does: no window here is ever in sight
         try:
             with mock.patch.object(suitetheme, 'frame_interval', lambda: 4):
                 suitetheme._frame_rate()
