@@ -347,6 +347,7 @@ class SettingsWindow(QWidget):
     tab_changed = Signal(int, int, int)             # the panel's tab: its length and thickness (px), opacity at rest (%)
     pins_changed = Signal(list)                     # the panel's shortcuts: [pins.Pin]
     pages_changed = Signal(list)                    # the panel's pages: names from panel.PAGES, in order
+    sensors_asked = Signal(str)                     # Hanami Sensors: '--install' (or update) or '--uninstall'
     check_now = Signal()
     show_page = Signal(str)
     open_url = Signal(str)
@@ -490,12 +491,32 @@ class SettingsWindow(QWidget):
         for name, title, about in (
                 ('apps', 'Hanami suite', ''), ('pinned', 'Shortcuts', ''),
                 ('stats', 'Stats', 'The processor and memory - and, with an NVIDIA graphics card, its load, memory '
-                                   'and temperature. The processor’s temperature comes from LibreHardwareMonitor, '
-                                   'while it runs with its Remote Web Server on.')):
+                                   'and temperature. The processor’s temperature needs Hanami Sensors, below.')):
             holder, check = _switch(title, about, name in chosen)
             check.toggled.connect(self._pages_edited)
             box.addWidget(holder)
             self.page_switches[name] = check
+        layout.addWidget(frame)
+        frame, box = _section('CPU temperature')
+        box.addWidget(_label('Windows doesn’t give apps the processor’s temperature. Hanami Sensors reads it '
+                             'through PawnIO, as FanControl does: a small service that runs only while the stats '
+                             'page is in sight. Installing it asks for administrator permission.', 9, role='dim',
+                             wrap=True))
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self.sensors_status = _label('', 9.5)
+        row.addWidget(self.sensors_status, 1)
+        self.sensors_install = QPushButton('Install')
+        self.sensors_install.clicked.connect(lambda: self.sensors_asked.emit('--install'))
+        self.sensors_remove = QPushButton('Remove')
+        self.sensors_remove.clicked.connect(lambda: self.sensors_asked.emit('--uninstall'))
+        for button in (self.sensors_install, self.sensors_remove):
+            button.setCursor(Qt.PointingHandCursor)
+            row.addWidget(button)
+        box.addLayout(row)
+        self.sensors_problem = _label('', 8.5, role='dim', wrap=True)
+        self.sensors_problem.hide()
+        box.addWidget(self.sensors_problem)
         layout.addWidget(frame)
         frame, box = _section('Tab')
         grid = QGridLayout()
@@ -792,6 +813,34 @@ class SettingsWindow(QWidget):
         edge = next((name for name, button in self.edge_buttons.items() if button.isChecked()), 'right')
         if emit:
             self.panel_changed.emit(edge if on else '')
+
+    def show_sensors(self, state, busy: str = '', problem: str = '') -> None:
+        """Hanami Sensors as it is (sensors.State): installed or not, up to date or not, what it
+        needs - and, while its setup runs, that (busy); what went wrong, if it did."""
+        install, remove = self.sensors_install, self.sensors_remove
+        install.setText('Update' if state.outdated else 'Install')
+        install.setVisible(not state.installed or state.outdated)
+        remove.setVisible(bool(state.installed))
+        ready = bool(state.bundled) and state.pawnio and state.dotnet
+        if busy:
+            text = busy
+        elif not state.bundled:
+            text = 'Not in this build of Hanami.'
+        elif state.installed and state.outdated:
+            text = f'Installed: version {state.installed}. Version {state.bundled} is ready.'
+        elif state.installed:
+            text = 'Installed.'
+        elif not state.pawnio:
+            text = 'PawnIO isn’t installed. FanControl and LibreHardwareMonitor install it.'
+        elif not state.dotnet:
+            text = 'It needs Microsoft’s .NET 10 Runtime.'
+        else:
+            text = 'Not installed.'
+        self.sensors_status.setText(text)
+        install.setEnabled(ready and not busy)
+        remove.setEnabled(not busy)
+        self.sensors_problem.setText(problem)
+        self.sensors_problem.setVisible(bool(problem))
 
     def _pages_edited(self, *_, emit: bool = True) -> None:
         """The panel's pages: at least one stays - the last one on can't be turned off."""

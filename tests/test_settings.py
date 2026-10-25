@@ -630,6 +630,39 @@ class PanelTests(_Controlled):
             self.controller._pins_changed([])
             self.panel.pages.go(0)
 
+    def test_hanami_sensors_in_settings(self):
+        from hanami import sensors
+        window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY), 'right')
+        asked = []
+        window.sensors_asked.connect(asked.append)
+        try:
+            shown = lambda: (window.sensors_status.text(), window.sensors_install.text(),
+                             not window.sensors_install.isHidden(), window.sensors_install.isEnabled(),
+                             not window.sensors_remove.isHidden())
+            window.show_sensors(sensors.State('', '1.0.0', True, True))
+            self.assertEqual(shown(), ('Not installed.', 'Install', True, True, False))
+            window.sensors_install.click()
+            self.assertEqual(asked, ['--install'])
+            window.show_sensors(sensors.State('', '1.0.0', True, True), 'Installing…')
+            self.assertFalse(window.sensors_install.isEnabled(), 'not twice at once')
+            window.show_sensors(sensors.State('1.0.0', '1.0.0', True, True))
+            self.assertEqual(shown(), ('Installed.', 'Install', False, True, True))
+            window.sensors_remove.click()
+            self.assertEqual(asked[-1], '--uninstall')
+            window.show_sensors(sensors.State('1.0.0', '1.1.0', True, True))
+            self.assertEqual(shown()[1:], ('Update', True, True, True), 'a newer one in this Hanami: Update')
+            window.show_sensors(sensors.State('', '1.0.0', False, True))
+            self.assertIn('PawnIO', window.sensors_status.text())
+            self.assertFalse(window.sensors_install.isEnabled(), 'nothing to read through without PawnIO')
+            window.show_sensors(sensors.State('', '1.0.0', True, False))
+            self.assertIn('.NET 10', window.sensors_status.text())
+            window.show_sensors(sensors.State('', '', True, True), problem='')
+            self.assertEqual(window.sensors_status.text(), 'Not in this build of Hanami.')
+            window.show_sensors(sensors.State('', '1.0.0', True, True), problem='Its setup failed (9).')
+            self.assertFalse(window.sensors_problem.isHidden())
+        finally:
+            window.close()
+
     def test_the_sound_button_asks_for_the_other(self):
         from hanami.ui.sound import SoundToggle
         button, asked = SoundToggle(), []

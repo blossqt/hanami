@@ -1,0 +1,7 @@
+<Project>
+  <!-- Build output stays out of the project folder, as Hanami's other build output does. -->
+  <PropertyGroup>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(LOCALAPPDATA)\HanamiBuild\sensors-artifacts\$(MSBuildProjectName)</ArtifactsPath>
+  </PropertyGroup>
+</Project>

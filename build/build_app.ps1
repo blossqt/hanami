@@ -43,6 +43,11 @@ Copy-Item (Join-Path $Root 'README.md') $Dist -Force -ErrorAction SilentlyContin
 Copy-Item (Join-Path $Root 'THIRD-PARTY-NOTICES.md') $Dist -Force -ErrorAction SilentlyContinue
 Copy-Item (Join-Path $Root 'LICENSE') $Dist -Force -ErrorAction SilentlyContinue
 
+# Hanami Sensors - the processor's temperature - goes beside it: the service and its setup.
+Write-Host '>> Hanami Sensors'
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root 'sensors\build.ps1') -Out (Join-Path $Dist 'sensors')
+if ($LASTEXITCODE -ne 0) { Fail 'Hanami Sensors did not build' }
+
 # Does it start? --self-test loads what a real start loads and answers with
 # the version, without showing anything.
 $Answer = Join-Path $env:TEMP "hanami-build-self-test-$PID.txt"

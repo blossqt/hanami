@@ -77,6 +77,32 @@ suite. **Start with Hanami:** whenever Hanami starts - at sign-in or opened
 by hand - it starts the apps ticked there that aren't running yet, in the
 background.
 
+## The edge panel
+
+A thin tab at the screen's edge: rest the pointer on it, or click it, and a pane of glass slides
+out. Its pages turn with the scroll wheel, the dots along its bottom showing which is in sight:
+
+- **Hanami suite**: the suite's apps, a dot under those running;
+- **Shortcuts**: programs, files, folders and websites, pinned in Settings > Edge panel;
+- **Stats**: the processor and memory, and, with an NVIDIA graphics card, its load, memory and
+  temperature (read from NVIDIA's own `nvml.dll`), once a second while the page is in sight.
+
+Under every page, the sound output switch and a button muting the microphone. Settings > Edge
+panel chooses its edge, its pages, its tab, and the shortcuts. It keeps away from games and
+anything full screen.
+
+**The processor's temperature** comes from **Hanami Sensors** (`sensors\`): Windows gives no
+program a processor's temperature on most PCs; it takes a driver to read. Hanami Sensors is a
+small Windows service that reads it through [PawnIO](https://pawnio.eu), the driver FanControl and
+LibreHardwareMonitor use, with LibreHardwareMonitor's library, and lays it in shared memory that
+signed-in users may read but not write. Nothing listens: no port, no pipe. Hanami asks for a
+reading while the stats page is in sight, and the service stops itself after a minute unasked.
+
+**Install** in Settings > Edge panel > CPU temperature puts it in `Program Files\Hanami Sensors`.
+Windows asks for administrator permission first. Its setup checks every file against the SHA-256
+built into it before copying, so nothing changed since the build gets in. It needs PawnIO and
+Microsoft's .NET 10 Runtime.
+
 ## Colours
 
 The suite is blossom pink. Every app's icon is a `#ffd1dc` tile with a deep
@@ -127,6 +153,8 @@ powershell -ExecutionPolicy Bypass -File build\build_app.ps1
 powershell -ExecutionPolicy Bypass -File build\release.ps1 --notes "What's new"
 ```
 
+`build_app.ps1` also builds Hanami Sensors (`sensors\build.ps1`), which needs the .NET 10 SDK.
+
 `release.ps1` builds, checks and zips Hanami, signs its `latest.json` with the
 key in `~\.hanami\release\`, and publishes the release on GitHub. The top of
 `build\release.py` describes each step. **Back up the keys** in
@@ -141,6 +169,9 @@ pipe and instance names of their own):
 - `tests\test_apps.py` - Keytap and Dropshift from source, folding into Hanami
 - `tests\test_install.py` - checking, installing, updating and removing, against a
   stand-in GitHub on this PC with releases signed by a test key
+- `tests\test_stats.py` - Hanami Sensors' shared memory, the built service run as the user
+  with a made-up reading, and its setup refusing a changed file (none of it needs
+  administrator rights or installs anything)
 
 ## Photo
 

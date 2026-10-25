@@ -2,10 +2,8 @@
 memory is in use, from Windows - and, from NVIDIA's driver (nvml.dll) where there is one, how busy
 the graphics card is, its memory and its temperature.
 
-Windows gives no program the processor's temperature on a PC like this one (no thermal zones): it
-takes a driver of its own to read. So that comes from LibreHardwareMonitor, while it runs with its
-Remote Web Server on (LHM_URL, on this PC only) - fetched on a thread of its own, the last reading
-kept for the next sample. Without it, there is no processor temperature.
+The processor's temperature comes from Hanami Sensors (sensors.py), where it is installed: Windows
+gives no program a processor's temperature on PCs like this one - it takes a driver to read.
 
 Sampled only while the stats page is in sight: a sample takes well under a millisecond.
 """
@@ -13,19 +11,14 @@ Sampled only while the stats page is in sight: a sample takes well under a milli
 from __future__ import annotations
 
 import ctypes
-import json
 import os
 import threading
-import time
-import urllib.request
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import Path
 
-LHM_URL = 'http://127.0.0.1:8085/data.json'       # LibreHardwareMonitor's Remote Web Server, its default port
-LHM_EVERY = 1.0         # s between readings from it, while samples are being taken
-LHM_AGAIN = 10.0        # s before trying it again, when it didn't answer
-LHM_STALE = 5.0         # s a reading is kept for, without a newer one
+from . import sensors
+
 _NVML_PLACES = (Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'nvml.dll',
                 Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'NVIDIA Corporation' / 'NVSMI' / 'nvml.dll')
 
@@ -37,7 +30,7 @@ class Stats:
     gpu: float | None = None                # % busy (None: no NVIDIA card)
     vram: tuple[int, int] | None = None     # bytes in use, bytes in all
     gpu_temp: int | None = None             # °C
-    cpu_temp: float | None = None           # °C, from LibreHardwareMonitor (None: it isn't running)
+    cpu_temp: float | None = None           # °C, from Hanami Sensors (None: it isn't installed)
 
 
 class _MemoryStatus(ctypes.Structure):
@@ -71,11 +64,7 @@ class Sampler:
         self._nvml = None
         self._gpu = None
         self._looked_for_gpu = False
-        self.lhm_url = LHM_URL
-        self._cpu_temp: tuple[float, float] | None = None      # (°C, when it was read)
-        self._lhm_next = 0.0                                    # when to ask LibreHardwareMonitor next
-        self._lhm_asking = False
-        self._direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # no proxy for this PC
+        self.sensors = sensors.Reader()
 
     def prepare(self) -> None:
         """Find the graphics card, on a thread of its own: loading NVIDIA's driver takes a good
@@ -86,31 +75,7 @@ class Sampler:
             threading.Thread(target=self._find_gpu, name='hanami-gpu', daemon=True).start()
 
     def take(self) -> Stats:
-        return Stats(self._cpu(), self._ram(), *self._card(), self._processor_temperature())
-
-    # ------------------------------------------------------------------ LibreHardwareMonitor
-
-    def _processor_temperature(self) -> float | None:
-        """The last reading from LibreHardwareMonitor - asking it for a new one, on a thread of
-        its own, now and then (more seldom while it doesn't answer)."""
-        now = time.monotonic()
-        if not self._lhm_asking and now >= self._lhm_next:
-            self._lhm_asking = True
-            self._lhm_next = now + LHM_EVERY
-            threading.Thread(target=self._ask_lhm, name='hanami-lhm', daemon=True).start()
-        kept = self._cpu_temp
-        return kept[0] if kept is not None and now - kept[1] < LHM_STALE else None
-
-    def _ask_lhm(self) -> None:
-        try:
-            with self._direct.open(self.lhm_url, timeout=0.8) as answer:
-                found = cpu_temperature(json.loads(answer.read().decode('utf-8', 'replace')))
-        except (OSError, ValueError):
-            found = None
-            self._lhm_next = time.monotonic() + LHM_AGAIN
-        if found is not None:
-            self._cpu_temp = (found, time.monotonic())
-        self._lhm_asking = False
+        return Stats(self._cpu(), self._ram(), *self._card(), self.sensors.temperature())
 
     def _cpu(self) -> float | None:
         idle, kernel, user = wintypes.FILETIME(), wintypes.FILETIME(), wintypes.FILETIME()
@@ -161,26 +126,3 @@ class Sampler:
             self._nvml = nvml
             self._gpu = gpu                     # last: take() goes by this, from the windows' thread
             return
-
-
-def cpu_temperature(tree: dict) -> float | None:
-    """The processor's temperature in LibreHardwareMonitor's data.json (°C, whatever unit it
-    shows): AMD's "Core (Tctl/Tdie)" or Intel's "CPU Package" - else the hottest of the processor's
-    temperatures."""
-    found: list[tuple[str, float]] = []
-
-    def walk(node: dict) -> None:
-        sensor = str(node.get('SensorId', ''))
-        if node.get('Type') == 'Temperature' and sensor.startswith(('/amdcpu/', '/intelcpu/')):
-            value = node.get('RawValue')
-            if isinstance(value, (int, float)) and 0 < value < 150:
-                found.append((str(node.get('Text', '')), float(value)))
-        for child in node.get('Children') or ():
-            if isinstance(child, dict):
-                walk(child)
-
-    walk(tree)
-    for name, value in found:
-        if 'tctl' in name.lower() or 'package' in name.lower():
-            return value
-    return max((value for _, value in found), default=None)

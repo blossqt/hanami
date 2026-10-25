@@ -661,7 +661,7 @@ class EdgePanel(QWidget):
         rows = self.stat_rows
         rows['cpu'].set_value('…' if stats.cpu is None else f'{stats.cpu:.0f}%',
                               None if stats.cpu is None else stats.cpu / 100)
-        rows['cpu_temp'].setVisible(stats.cpu_temp is not None)       # only while LibreHardwareMonitor runs
+        rows['cpu_temp'].setVisible(stats.cpu_temp is not None)       # only with Hanami Sensors installed
         if stats.cpu_temp is not None:
             rows['cpu_temp'].set_value(f'{stats.cpu_temp:.0f}°C')
         used, total = stats.ram

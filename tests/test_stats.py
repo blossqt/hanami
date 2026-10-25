@@ -1,97 +1,120 @@
-"""The edge panel's stats: the processor's temperature from LibreHardwareMonitor's Remote Web Server
-- here a stand-in one, on a port of its own: none of this needs LibreHardwareMonitor installed."""
+"""The edge panel's stats: the processor's temperature from Hanami Sensors' shared memory.
+
+None of this needs Hanami Sensors installed, nor administrator rights: the shared memory is made
+here (or by the built service run as the user, --console), under Local\\ names of the tests' own.
+The built service and setup are used when they are there - build_app.ps1, or sensors\\build.ps1.
+"""
 
 from __future__ import annotations
 
-import json
+import ctypes
+import os
+import shutil
+import struct
+import subprocess
 import sys
-import threading
+import tempfile
 import time
 import unittest
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from ctypes import wintypes
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
 
-from hanami import stats  # noqa: E402
+from hanami import sensors, stats  # noqa: E402
+
+BUILT = Path(os.environ.get('LOCALAPPDATA', '')) / 'HanamiBuild' / 'sensors' / 'out'
+
+kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+kernel.CreateFileMappingW.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD,
+                                      wintypes.DWORD, wintypes.LPCWSTR]
+kernel.CreateFileMappingW.restype = wintypes.HANDLE
+kernel.MapViewOfFile.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, ctypes.c_size_t]
+kernel.MapViewOfFile.restype = ctypes.c_void_p
+kernel.UnmapViewOfFile.argtypes = [ctypes.c_void_p]
+kernel.CloseHandle.argtypes = [wintypes.HANDLE]
 
 
-def _tree(cpu: list[tuple[str, float]], gpu_temp: float = 80.0, vendor: str = 'amdcpu') -> dict:
-    """data.json, as LibreHardwareMonitor 0.9.6 serves it: the computer, its hardware, each kind of
-    sensor, the sensors."""
-    sensors = [{'id': 10 + i, 'Text': name, 'SensorId': f'/{vendor}/0/temperature/{i}', 'Type': 'Temperature',
-                'Value': f'{value:.1f} °C', 'RawValue': value, 'Children': []} for i, (name, value) in enumerate(cpu)]
-    return {'id': 0, 'Text': 'Sensor', 'Children': [{'id': 1, 'Text': 'PC', 'Children': [
-        {'id': 2, 'Text': 'The processor', 'HardwareId': f'/{vendor}/0', 'Children': [
-            {'id': 3, 'Text': 'Temperatures', 'Children': sensors},
-            {'id': 4, 'Text': 'Load', 'Children': [{'id': 5, 'Text': 'CPU Total', 'SensorId': f'/{vendor}/0/load/0',
-                                                    'Type': 'Load', 'RawValue': 99.0, 'Children': []}]}]},
-        {'id': 6, 'Text': 'The graphics card', 'HardwareId': '/gpu-nvidia/0', 'Children': [
-            {'id': 7, 'Text': 'Temperatures', 'Children': [{'id': 8, 'Text': 'GPU Core', 'Type': 'Temperature',
-                                                            'SensorId': '/gpu-nvidia/0/temperature/0',
-                                                            'RawValue': gpu_temp, 'Children': []}]}]}]}]}
+class _Block:
+    """Shared memory laid out as the service lays it, written here."""
+
+    def __init__(self, name: str):
+        self.mapping = kernel.CreateFileMappingW(wintypes.HANDLE(-1), None, 0x04, 0, 4096, name)
+        self.view = kernel.MapViewOfFile(self.mapping, 0x02, 0, 0, 4096)
+
+    def write(self, sequence: int, status: int, read_at_ms: int, celsius: float) -> None:
+        ctypes.memmove(self.view, struct.pack('<IIIiqd', sensors.MAGIC, sensors.LAYOUT, sequence, status,
+                                              read_at_ms, celsius), 32)
+
+    def close(self) -> None:
+        kernel.UnmapViewOfFile(self.view)
+        kernel.CloseHandle(self.mapping)
 
 
-class TemperatureTests(unittest.TestCase):
-    def test_the_processors_own_sensor(self):
-        self.assertEqual(stats.cpu_temperature(_tree([('CCD1 (Tdie)', 68.0), ('Core (Tctl/Tdie)', 71.5)])), 71.5,
-                         'AMD: Tctl/Tdie')
-        self.assertEqual(stats.cpu_temperature(_tree([('CPU Core #1', 60.0), ('CPU Package', 64.0)], vendor='intelcpu')),
-                         64.0, 'Intel: the package')
-        self.assertEqual(stats.cpu_temperature(_tree([('A', 55.0), ('B', 58.0)])), 58.0, 'else the hottest')
-        self.assertIsNone(stats.cpu_temperature(_tree([])), 'the graphics card’s is not the processor’s')
-        self.assertIsNone(stats.cpu_temperature({}))
-
-
-class _StandIn(BaseHTTPRequestHandler):
-    tree: dict = {}
-
-    def do_GET(self):
-        body = json.dumps(self.tree).encode()
-        self.send_response(200 if self.path == '/data.json' else 404)
-        self.send_header('Content-Type', 'application/json')
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *args):
-        pass
-
-
-class SamplerTests(unittest.TestCase):
-    def _until(self, sampler, test, seconds: float = 3.0):
-        until = time.monotonic() + seconds
-        while time.monotonic() < until:
-            got = sampler.take()
-            if test(got):
-                return got
-            time.sleep(0.05)
-        return sampler.take()
-
-    def test_read_from_libre_hardware_monitor_while_it_runs(self):
-        _StandIn.tree = _tree([('Core (Tctl/Tdie)', 72.25)])
-        server = ThreadingHTTPServer(('127.0.0.1', 0), _StandIn)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+class ReaderTests(unittest.TestCase):
+    def test_a_fresh_reading_and_nothing_else(self):
+        name = f'Local\\HanamiSensorsTest{os.getpid()}'
+        reader = sensors.Reader(name, name + 'Wanted', service=None)
+        self.assertIsNone(reader.temperature(), 'no service: nothing')
+        block = _Block(name)
         try:
-            sampler = stats.Sampler()
-            sampler.lhm_url = f'http://127.0.0.1:{server.server_address[1]}/data.json'
-            started = time.perf_counter()
-            first = sampler.take()
-            self.assertLess(time.perf_counter() - started, 0.05, 'asked on a thread: a sample never waits')
-            self.assertIsNone(first.cpu_temp, 'not there yet')
-            self.assertEqual(self._until(sampler, lambda s: s.cpu_temp is not None).cpu_temp, 72.25)
+            now = int(time.time() * 1000)
+            block.write(2, 0, now, 64.25)
+            self.assertEqual(reader.temperature(), 64.25)
+            block.write(3, 0, now, 70.0)
+            self.assertEqual(reader.temperature(), 64.25, 'caught mid-write: the reading before')
+            block.write(4, 1, now, float('nan'))
+            self.assertIsNone(reader.temperature(), 'no sensor')
+            block.write(6, 0, now - 60_000, 64.0)
+            self.assertIsNone(reader.temperature(), 'a minute old: not to be shown')
         finally:
-            server.shutdown()
-            server.server_close()
+            block.close()
 
-    def test_none_without_it(self):
-        server = ThreadingHTTPServer(('127.0.0.1', 0), _StandIn)
-        port = server.server_address[1]
-        server.server_close()                                       # nothing on that port now
+    def test_the_sampler_has_it(self):
         sampler = stats.Sampler()
-        sampler.lhm_url = f'http://127.0.0.1:{port}/data.json'
-        got = self._until(sampler, lambda s: not sampler._lhm_asking and sampler._lhm_next - time.monotonic() > 5, 3)
-        self.assertIsNone(got.cpu_temp)
-        self.assertGreater(sampler._lhm_next - time.monotonic(), stats.LHM_EVERY, 'asked again only later')
+        sampler.sensors = sensors.Reader(f'Local\\HanamiSensorsNone{os.getpid()}', 'Local\\none', service=None)
+        self.assertIsNone(sampler.take().cpu_temp, 'without Hanami Sensors: no processor temperature')
+
+
+@unittest.skipUnless((BUILT / 'HanamiSensorsSetup.exe').is_file(), 'Hanami Sensors not built (sensors\\build.ps1)')
+class BuiltTests(unittest.TestCase):
+    def test_the_service_as_the_user(self):
+        name = f'HanamiSensorsRun{os.getpid()}'
+        service = subprocess.Popen([str(BUILT / 'service' / 'HanamiSensors.exe'), '--console', name,
+                                    '--fake', '58.5', '--idle', '1.5'])
+        try:
+            reader = sensors.Reader(f'Local\\{name}', f'Local\\{name}Wanted', service=None)
+            until, got = time.monotonic() + 10, None
+            while time.monotonic() < until and got is None:
+                got = reader.temperature()
+                time.sleep(0.1)
+            self.assertEqual(got, 58.5, 'read through shared memory')
+            readings = []
+            for _ in range(6):
+                readings.append(reader.temperature())
+                time.sleep(0.2)
+            self.assertEqual(readings, [58.5] * 6, 'asked over and over: never a torn one')
+            self.assertEqual(service.wait(10), 0, 'and it stops by itself, unasked')
+        finally:
+            if service.poll() is None:
+                service.kill()
+
+    def test_the_setup_installs_nothing_changed(self):
+        folder = Path(tempfile.mkdtemp(prefix='hs-'))
+        try:
+            copy = folder / 'sensors'
+            shutil.copytree(BUILT, copy)
+            setup = str(copy / 'HanamiSensorsSetup.exe')
+            self.assertEqual(subprocess.run([setup, '--verify']).returncode, 0, 'as built')
+            library = copy / 'service' / 'LibreHardwareMonitorLib.dll'
+            data = bytearray(library.read_bytes())
+            data[4096] ^= 1
+            library.write_bytes(bytes(data))
+            self.assertEqual(subprocess.run([setup, '--verify']).returncode, 3, 'one byte changed: refused')
+            if not ctypes.windll.shell32.IsUserAnAdmin():
+                self.assertEqual(subprocess.run([setup, '--install']).returncode, 2, 'not as administrator: refused')
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
 
 
 if __name__ == '__main__':

@@ -27,7 +27,7 @@ from PySide6.QtGui import QAction, QDesktopServices, QFont, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import APP_NAME, __version__, audio, catalog, installer, releases, suitelog, win32
+from . import APP_NAME, __version__, audio, catalog, installer, releases, sensors, suitelog, win32
 from .host import TrayHost
 from .hotkeys import Hotkeys, HotkeyError, normalize
 from .stats import Sampler
@@ -245,6 +245,7 @@ class _Bridge(QObject):
     progress = Signal(str, str, int, int)     # name, phase, done, total
     prepared = Signal(str, object)            # name, the staged folder of a checked new version
     finished = Signal(str, object)            # name, files installed (list) or an error (str)
+    sensors_done = Signal(str, str)           # Hanami Sensors' setup: what it was asked, what went wrong ('' if nothing)
 
 
 class Controller(QObject):
@@ -270,6 +271,7 @@ class Controller(QObject):
         self._bridge.progress.connect(self._job_progress)
         self._bridge.prepared.connect(self._job_prepared)
         self._bridge.finished.connect(self._job_finished)
+        self._bridge.sensors_done.connect(self._sensors_done)
         self._held: list[tuple[str, str, QIcon]] = []     # notifications kept back while a game is in front
         self._make_tray()
         self._listen()
@@ -567,6 +569,20 @@ class Controller(QObject):
             problem = pins.open_pin(pinned[index])
             if problem:
                 self._say('Hanami', problem, icons.app_icon())
+
+    def _sensors_asked(self, action: str) -> None:
+        """Install (or update) or remove Hanami Sensors: its setup, run as administrator - Windows
+        asks first - on a thread of its own, as it is waited for."""
+        if self.settings_window is not None:
+            self.settings_window.show_sensors(sensors.state(), 'Removing…' if action == '--uninstall' else 'Installing…')
+        threading.Thread(target=lambda: self._bridge.sensors_done.emit(action, sensors.run_setup(action)),
+                         name='hanami-sensors-setup', daemon=True).start()
+
+    def _sensors_done(self, action: str, problem: str) -> None:
+        if self.settings_window is not None:
+            self.settings_window.show_sensors(sensors.state(), problem=problem)
+        if problem:
+            self._say('Hanami Sensors', problem, icons.app_icon())
 
     def _pages_changed(self, names: list) -> None:
         self.settings.panel_pages = names
@@ -994,12 +1010,14 @@ class Controller(QObject):
             self.settings_window.tab_changed.connect(self._tab_changed)
             self.settings_window.pins_changed.connect(self._pins_changed)
             self.settings_window.pages_changed.connect(self._pages_changed)
+            self.settings_window.sensors_asked.connect(self._sensors_asked)
             self.settings_window.updates_changed.connect(self._updates_changed)
             self.settings_window.check_now.connect(self.check_releases)
             self.settings_window.show_page.connect(self.show_page)
             self.settings_window.open_url.connect(lambda url: QDesktopServices.openUrl(QUrl(url)))
         if page:
             self.settings_window.open_page(page)
+        self.settings_window.show_sensors(sensors.state())
         try:
             outputs = audio.outputs()
         except OSError:
