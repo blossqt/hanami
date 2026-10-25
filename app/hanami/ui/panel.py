@@ -183,8 +183,9 @@ class _Handle(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
-        color = QColor(c.text if self._hover or self._grab is not None else c.dim)
-        color.setAlpha(230 if self._hover or self._grab is not None else 170)
+        held = self._hover or self._grab is not None
+        color = QColor(c.text if held else c.dim)
+        color.setAlpha(160 if held else 70)            # faint until the pointer comes to it
         painter.setBrush(color)
         grip = QRectF(0, 0, 30, 4)
         grip.moveCenter(QPointF(self.width() / 2, self.height() / 2))
@@ -223,11 +224,9 @@ class _AppButton(QWidget):
 
     def enterEvent(self, event):
         self._to(1.0)
-        QToolTip.showText(self.mapToGlobal(QPoint(0, self.height() // 2)), self.name, self)
 
     def leaveEvent(self, event):
         self._to(0.0)
-        QToolTip.hideText()
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton and self.rect().contains(event.position().toPoint()):
