@@ -2,7 +2,7 @@
 of glass slides out there over a photo of blossom. It has three pages, turned with the scroll wheel
 (or the dots along its bottom, showing which is in sight): the suite's apps, what is pinned to it
 in Settings (programs, files, folders, websites), and how busy the PC is (stats.py) - sampled once a
-second only while that page is in sight. Under them, on every page, a Brightness row that drops
+second only while that page is in sight. Under them, on every page, a sun button that drops
 down a slider for each monitor that has one (brightness.py) - the panel growing to hold them, and
 folding them away again as it goes - then the sound button and the microphone's mute button.
 
@@ -49,7 +49,7 @@ STATS_QUICK = 250, 2.0  # ms between samples, for the first s of it: so the proc
 SET_HELD = 2.0          # s after a brightness slider is moved during which a reading doesn't move it back
                         # (the reading may be from before)
 FOLD_MS = 220           # the brightness sliders dropping down, or folding away
-SUN, CHEVRON = '', ''      # Segoe Fluent Icons: Brightness, ChevronDown
+SUN = ''          # Segoe Fluent Icons: Brightness
 MARGIN = 10           # between the panel and the screen's edge
 NEAR = 48               # px in from the screen's edge that count as at it
 DWELL = 0.3             # s the pointer rests at the edge before the panel comes out
@@ -467,8 +467,8 @@ class _Brightness(QWidget):
 
 
 class _Fold(QWidget):
-    """The Brightness row: a sun, its name and a chevron. Clicked, the brightness sliders drop down
-    under it, or fold away; the chevron turns with them (opened: 0 folded, 1 down)."""
+    """The brightness button: a sun, nothing more (the user's wish). Clicked, the brightness sliders
+    drop down under it, or fold away; it lights up pink as they come (opened: 0 folded, 1 down)."""
     clicked = Signal()
 
     def __init__(self):
@@ -508,18 +508,16 @@ class _Fold(QWidget):
         painter.fillPath(shape, c.chip)
         if self._hover:
             painter.fillPath(shape, QColor(255, 255, 255, 40 if theme.is_dark() else 120))
-        painter.setPen(QPen(c.border, 1))
+        if self.opened > 0:
+            lit = QColor(theme.ACCENT)
+            lit.setAlphaF(self.opened)
+            painter.fillPath(shape, lit)
+        painter.setPen(QPen(c.edge if self.opened > 0.5 else c.border, 1))
         painter.drawPath(shape)
-        painter.setPen(c.text)
-        painter.setFont(glyph_font(11))
-        painter.drawText(QRectF(8, 0, 18, self.height()), Qt.AlignCenter, SUN)
-        painter.setFont(theme.font(8.5))
-        painter.drawText(QRectF(30, 0, self.width() - 56, self.height()), Qt.AlignLeft | Qt.AlignVCenter, 'Brightness')
-        painter.setPen(c.dim)
-        painter.setFont(glyph_font(8))
-        painter.translate(self.width() - 15, self.height() / 2)
-        painter.rotate(180 * self.opened)
-        painter.drawText(QRectF(-8, -8, 16, 16), Qt.AlignCenter, CHEVRON)
+        glyph = QColor(theme.ON_ACCENT) if self.opened > 0.5 else c.text
+        painter.setPen(glyph)
+        painter.setFont(glyph_font(12))
+        painter.drawText(QRectF(self.rect()), Qt.AlignCenter, SUN)
         painter.end()
 
 
@@ -737,7 +735,7 @@ class EdgePanel(QWidget):
         self.pages.add(stats_page)
         self.pages.changed.connect(self._page_turned)
         layout.addWidget(self.pages)
-        self.fold = _Fold()                         # the Brightness row: the sliders drop down under it
+        self.fold = _Fold()                         # the sun: the brightness sliders drop down under it
         self.fold.clicked.connect(lambda: self._fold_to(not self.screens_open))
         self.fold.hide()
         layout.addWidget(self.fold)
@@ -845,12 +843,12 @@ class EdgePanel(QWidget):
         self._show_fold()
 
     def set_brightness_shown(self, on: bool) -> None:
-        """Whether it has the Brightness row and its sliders (Settings)."""
+        """Whether it has the sun button and its sliders (Settings)."""
         self._brightness_on = on
         self._show_fold()
 
     def _show_fold(self) -> None:
-        """The Brightness row, with monitors to set and the sliders on - and, if they are down, as
+        """The sun button, with monitors to set and the sliders on - and, if they are down, as
         many of them as there are now."""
         shown = self._brightness_on and bool(self.brightness_rows)
         self.fold.setVisible(shown)

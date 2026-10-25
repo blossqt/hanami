@@ -700,7 +700,7 @@ class PanelTests(_Controlled):
         self.controller._monitors_found([Monitor('a', 'TYPEC', 40), Monitor('b', 'DELL G2524H', 75)])
         rows = self.panel.brightness_rows
         self.assertEqual([(row.name, row.value) for row in rows], [('TYPEC', 40), ('DELL G2524H', 75)])
-        self.assertTrue(self.panel.fold.isVisibleTo(self.panel), 'a Brightness row')
+        self.assertTrue(self.panel.fold.isVisibleTo(self.panel), 'a sun button')
         self.assertFalse(self.panel.screens.isVisibleTo(self.panel), 'its sliders folded away')
         folded, top = self.panel.height(), self.panel.y()
         QTest.mouseClick(self.panel.fold, Qt.LeftButton)
@@ -736,7 +736,7 @@ class PanelTests(_Controlled):
         self.assertEqual(monitors.looked, looked, 'off: not looked at')
         self.controller._brightness_changed(True)
         self.controller._monitors_found([])
-        self.assertFalse(self.panel.fold.isVisibleTo(self.panel), 'no monitor answers: no Brightness row')
+        self.assertFalse(self.panel.fold.isVisibleTo(self.panel), 'no monitor answers: no sun button')
         window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY), 'right')
         window.brightness_changed.connect(self.controller._brightness_changed)
         try:
