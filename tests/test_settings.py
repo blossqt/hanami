@@ -416,7 +416,7 @@ class PanelTests(_Controlled):
         s = self.screen
         self.rest_at(s.right() - self.panel_module.NEAR - 20, s.center().y(), 0.5)
         self.assertFalse(self.panel.isVisible(), 'not out in the screen')
-        self.rest_at(s.right() - self.panel_module.NEAR + 10, s.center().y() + 150, 0.5)
+        self.rest_at(s.right() - self.panel_module.NEAR + 10, s.center().y() + 100, 0.5)    # past the tab's end
         self.assertTrue(self.panel.isVisible(), 'a little in from the edge, beside the panel')
 
     def test_not_at_the_ends_of_the_edge_nor_over_anything_full_screen(self):
@@ -514,6 +514,131 @@ class PanelTests(_Controlled):
         self.controller.settings._store.setValue('panel/tab_length', 9999)
         self.assertEqual(self.controller.settings.panel_tab[0], self.panel_module.TAB_LIMITS[0][1], 'within limits')
         self.controller.settings.panel_tab = self.panel_module.TAB_LOOK
+
+    def _open(self):
+        s = self.screen
+        self.rest_at(s.right(), s.center().y(), 0.4)
+        self.assertTrue(self.panel.isVisible())
+
+    def _wheel(self, notches: int) -> None:
+        from PySide6.QtCore import QPoint, QPointF, Qt
+        from PySide6.QtGui import QWheelEvent
+        event = QWheelEvent(QPointF(10, 10), QPointF(10, 10), QPoint(0, 0), QPoint(0, -120 * notches),
+                            Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+        self.panel.wheelEvent(event)
+
+    def test_the_microphone_button(self):
+        from unittest import mock
+        state = {'muted': False}
+        with mock.patch.object(hanami.audio, 'mic_muted', lambda: state['muted']), \
+                mock.patch.object(hanami.audio, 'mute_mic', lambda muted: state.update(muted=muted)):
+            self._open()
+            qt.processEvents()
+            self.assertIs(self.panel.mic.muted, False, 'shown as it is')
+            self.panel.mic.clicked.emit()
+            self.assertEqual((state['muted'], self.panel.mic.muted), (True, True), 'muted, and shown so')
+            self.panel.mic.clicked.emit()
+            self.assertEqual((state['muted'], self.panel.mic.muted), (False, False))
+            state['muted'] = None
+            self.controller._update_mic()
+            self.assertIsNone(self.panel.mic.muted, 'none plugged in')
+
+    def test_the_scroll_wheel_turns_the_pages(self):
+        from hanami.stats import Stats
+        sampled = []
+        self.panel.stats_source = lambda: sampled.append(1) or Stats(12.0, (8 * 2 ** 30, 32 * 2 ** 30), 50.0,
+                                                                     (2 * 2 ** 30, 12 * 2 ** 30), 60)
+        self.panel.pages.go(0)
+        self._open()
+        pages = self.panel.pages
+        self.assertEqual((pages.current, self.panel.dots.current, self.panel.dots.count), (0, 0, 3))
+        self._wheel(1)
+        self.assertEqual((pages.current, self.panel.dots.current), (1, 1), 'down: the next page')
+        self.assertEqual(sampled, [], 'stats sampled only on their own page')
+        self._wheel(1)
+        self.assertEqual(pages.current, 2)
+        self.assertEqual(len(sampled), 1, 'sampled at once')
+        self.assertTrue(self.panel._stats.isActive(), 'and once a second from then')
+        self.assertEqual(self.panel.stat_rows['vram'].value, '2.0/12 GB')
+        self.assertEqual(self.panel.stat_rows['gpu_temp'].value, '60°C')
+        self._wheel(1)
+        self.assertEqual(pages.current, 2, 'no further than the last')
+        self.panel.slide_away()
+        self.assertFalse(self.panel._stats.isActive(), 'nothing sampled once it has gone')
+        self.panel.set_pages(['apps', 'stats'])
+        self.assertEqual((self.panel.dots.count, pages.position), (2, 1), 'two pages: the stats still in sight')
+        self.panel.set_pages(['pinned'])
+        self.assertFalse(self.panel.dots.isVisibleTo(self.panel), 'one page: no dots')
+        self.panel.set_pages(list(self.panel_module.PAGES))
+        self.panel.pages.go(0)
+        self.panel.stats_source = self.controller.sampler.take
+
+    def test_pages_are_chosen_in_settings(self):
+        window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY), 'right',
+                                panel_pages=self.controller.settings.panel_pages)
+        window.pages_changed.connect(self.controller._pages_changed)
+        try:
+            switches = window.page_switches
+            switches['stats'].setChecked(False)
+            self.assertEqual(self.controller.settings.panel_pages, ['apps', 'pinned'], 'kept')
+            self.assertEqual(self.panel.pages.shown, [0, 1])
+            switches['apps'].setChecked(False)
+            self.assertFalse(switches['pinned'].isEnabled(), 'the last one can’t be turned off')
+            self.assertEqual(self.controller.settings.panel_pages, ['pinned'])
+        finally:
+            window.close()
+            self.controller._pages_changed(list(self.panel_module.PAGES))
+
+    def test_shortcuts(self):
+        from unittest import mock
+        from hanami.ui import pins
+        site = pins.for_address('www.Example.com/news')
+        self.assertEqual((site.kind, site.target, site.name), ('website', 'https://www.Example.com/news', 'example.com'))
+        self.assertIsNone(pins.for_address('not a website'))
+        folder = pins.for_path(str(Path(__file__).parent))
+        self.assertEqual((folder.kind, folder.name), ('folder', 'tests'))
+        program = pins.for_path(sys.executable)
+        self.assertEqual((program.kind, program.name), ('file', Path(sys.executable).stem))
+        window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY), 'right',
+                                pinned=self.controller.settings.pinned)
+        window.pins_changed.connect(self.controller._pins_changed)
+        opened, settings_pages = [], []
+        try:
+            window.address.setText('example.com')
+            window._add_website()
+            window._pin(program)
+            window._pin(program)
+            self.assertEqual(window.pin_note.text(), f'{program.name} is there already.')
+            self.assertEqual([p.name for p in self.controller.settings.pinned], ['example.com', program.name], 'kept')
+            with mock.patch.object(pins, 'open_pin', lambda pin: opened.append(pin.name) or ''), \
+                    mock.patch.object(self.controller, 'show_settings', lambda page='': settings_pages.append(page)):
+                self._open()
+                self._wheel(1)
+                self.assertEqual(len(self.panel.pin_buttons), 3, 'the two, then a plus')
+                self.panel.pin_buttons[1].clicked.emit(program.name)
+                self.assertEqual(opened, [program.name])
+                self.assertFalse(self.panel.isVisible(), 'it goes once something is opened')
+                self._open()
+                self.panel.pin_buttons[-1].clicked.emit()
+                self.assertEqual(settings_pages, ['Edge panel'], 'the plus: to Settings, to add more')
+            window._remove_pin(0)
+            self.assertEqual([p.name for p in self.controller.settings.pinned], [program.name])
+        finally:
+            window.close()
+            self.controller._pins_changed([])
+            self.panel.pages.go(0)
+
+    def test_the_sound_button_asks_for_the_other(self):
+        from hanami.ui.sound import SoundToggle
+        button, asked = SoundToggle(), []
+        button.chosen.connect(asked.append)
+        button.show_output('speakers')
+        button._other() == 'headphones' and button.chosen.emit(button._other())
+        button.show_output('headphones')
+        button.chosen.emit(button._other())
+        button.show_output(None)
+        button.chosen.emit(button._other())
+        self.assertEqual(asked, ['headphones', 'speakers', 'headphones'], 'neither: the headphones')
 
     def test_turned_off_or_moved_in_settings(self):
         window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY), 'right')

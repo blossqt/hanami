@@ -5,7 +5,8 @@ app's suitelink.py), so the tray holds one icon however many of them run.
 Hanami also installs and updates them, from their signed GitHub releases
 (releases.py, installer.py). And it keeps the suite's sound-output hotkey
 (audio.py, ui/sound.py), the edge panel that slides out at the screen's edge
-with the apps and the sound switch (ui/panel.py), and holds the apps'
+with the apps, what is pinned to it, the PC's stats, the sound button and the
+microphone's (ui/panel.py, ui/pins.py, stats.py), and holds the apps'
 notifications back while a full-screen game is in front (suitetheme's on_game).
 """
 
@@ -29,9 +30,10 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 from . import APP_NAME, __version__, audio, catalog, installer, releases, suitelog, win32
 from .host import TrayHost
 from .hotkeys import Hotkeys, HotkeyError, normalize
-from .ui import icons, theme
+from .stats import Sampler
+from .ui import icons, pins, theme
 from .ui.launcher import CardState, LauncherWindow, placeholder_icon
-from .ui.panel import TAB_LIMITS, TAB_LOOK, EdgePanel
+from .ui.panel import PAGES, TAB_LIMITS, TAB_LOOK, EdgePanel
 from .ui.settings import SettingsWindow
 from .ui.sound import HEADPHONES, SPEAKER, SoundPopup, sounds_like_headphones
 
@@ -181,6 +183,34 @@ class Settings:
         for name, value in zip(('length', 'thickness', 'opacity'), look):
             self._store.setValue(f'panel/tab_{name}', int(value))
 
+    @property
+    def pinned(self) -> list[pins.Pin]:
+        """What is pinned to the edge panel's second page, in order."""
+        try:
+            items = json.loads(str(self._store.value('panel/pinned', '[]')))
+        except ValueError:
+            return []
+        found = [pins.Pin.from_dict(item) for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+        return [pin for pin in found if pin is not None][:pins.MOST]
+
+    @pinned.setter
+    def pinned(self, pinned: list[pins.Pin]) -> None:
+        self._store.setValue('panel/pinned', json.dumps([pin.as_dict() for pin in pinned[:pins.MOST]]))
+
+    @property
+    def panel_pages(self) -> list[str]:
+        """The edge panel's pages (of PAGES, in that order): all of them until some are turned off."""
+        try:
+            names = json.loads(str(self._store.value('panel/pages', json.dumps(list(PAGES)))))
+        except ValueError:
+            names = list(PAGES)
+        names = [name for name in PAGES if isinstance(names, list) and name in names]
+        return names or list(PAGES)
+
+    @panel_pages.setter
+    def panel_pages(self, names: list[str]) -> None:
+        self._store.setValue('panel/pages', json.dumps([name for name in PAGES if name in names]))
+
     def set_sound(self, on: bool, hotkey: str) -> None:
         self._store.setValue('sound/hotkey_on', 'true' if on else 'false')
         self._store.setValue('sound/hotkey', hotkey)
@@ -248,10 +278,17 @@ class Controller(QObject):
         self.panel.open_app.connect(self.open_app)
         self.panel.open_hanami.connect(self.show_window)
         self.panel.output_clicked.connect(self.choose_output)
+        self.panel.mic_clicked.connect(self.toggle_mic)
+        self.panel.open_pin.connect(self.open_pin)
+        self.panel.add_pins.connect(lambda: self.show_settings('Edge panel'))
         self.panel.showing.connect(self._fill_panel)
+        self.sampler = Sampler()
+        self.panel.stats_source = self.sampler.take
+        self._pin_icons: dict[tuple, object] = {}
         self.panel.moved.connect(lambda place: setattr(self.settings, 'panel_place', place))
         self.panel.place = self.settings.panel_place
         self.panel.set_tab(*self.settings.panel_tab)
+        self.panel.set_pages(self.settings.panel_pages)
         self.panel.set_edge(self.settings.panel_edge)
         self._panel_icons: dict[str, tuple] = {}
         self.hotkeys = Hotkeys(self)
@@ -465,6 +502,8 @@ class Controller(QObject):
         """The switches at the top of Hanami's window and in the edge panel: lit on the speakers or
         the headphones, as the sound goes to one of them now."""
         toggles = [owner.sound for owner in (self.window, self.panel) if owner is not None and owner.isVisible()]
+        if self.panel.isVisible():
+            self._update_mic()
         if not toggles:
             return
         chosen = self.outputs_chosen()
@@ -476,6 +515,23 @@ class Controller(QObject):
         names = {which: picked[1] if picked else 'not chosen' for which, picked in chosen.items()}
         for toggle in toggles:
             toggle.show_output(side, f'Speakers: {names["speakers"]}\nHeadphones: {names["headphones"]}')
+
+    def toggle_mic(self) -> None:
+        """The panel's microphone button: muted, or not any more."""
+        try:
+            muted = audio.mic_muted()
+            if muted is not None:
+                audio.mute_mic(not muted)
+        except OSError:
+            traceback.print_exc()
+        self._update_mic()
+
+    def _update_mic(self) -> None:
+        try:
+            muted = audio.mic_muted()
+        except OSError:
+            muted = None
+        self.panel.show_mic(muted)
 
     # ------------------------------------------------------------------ the edge panel
 
@@ -493,7 +549,35 @@ class Controller(QObject):
                 continue
             apps.append((app.name, self._panel_icon(app.name, exe), self.is_running(app.name)))
         self.panel.show_apps(apps)
+        self.panel.show_pins([(pin.name, self._pin_icon(pin)) for pin in self.settings.pinned])
+        if 'stats' in self.settings.panel_pages:
+            self.sampler.prepare()                  # NVIDIA's driver, loaded only for the stats page
         QTimer.singleShot(0, self._update_sound)
+
+    def _pin_icon(self, pin: pins.Pin):
+        """Something pinned's icon, for the panel - kept while it is pinned."""
+        key = (pin.kind, pin.target)
+        if key not in self._pin_icons:
+            self._pin_icons[key] = pins.icon(pin, 40, self.panel.devicePixelRatioF())
+        return self._pin_icons[key]
+
+    def open_pin(self, index: int) -> None:
+        pinned = self.settings.pinned
+        if 0 <= index < len(pinned):
+            problem = pins.open_pin(pinned[index])
+            if problem:
+                self._say('Hanami', problem, icons.app_icon())
+
+    def _pages_changed(self, names: list) -> None:
+        self.settings.panel_pages = names
+        self.panel.set_pages(names)
+
+    def _pins_changed(self, pinned: list) -> None:
+        self.settings.pinned = pinned
+        kept = {(pin.kind, pin.target) for pin in pinned}
+        self._pin_icons = {key: icon for key, icon in self._pin_icons.items() if key in kept}
+        if self.panel.isVisible():
+            self.panel.show_pins([(pin.name, self._pin_icon(pin)) for pin in pinned])
 
     def _panel_icon(self, name: str, exe: Path):
         """An app's own icon, from its exe, for the panel - kept until the exe changes."""
@@ -901,12 +985,15 @@ class Controller(QObject):
             s = self.settings
             self.settings_window = SettingsWindow(s.start_with, win32.starts_with_windows(),
                                                   (s.check_updates, s.notify_updates, s.auto_update),
-                                                  (s.sound_hotkey_on, s.sound_hotkey), s.panel_edge, s.panel_tab)
+                                                  (s.sound_hotkey_on, s.sound_hotkey), s.panel_edge, s.panel_tab,
+                                                  s.pinned, s.panel_pages)
             self.settings_window.startup_changed.connect(self._startup_changed)
             self.settings_window.sound_changed.connect(self._sound_changed)
             self.settings_window.output_chosen.connect(self._output_chosen)
             self.settings_window.panel_changed.connect(self._panel_changed)
             self.settings_window.tab_changed.connect(self._tab_changed)
+            self.settings_window.pins_changed.connect(self._pins_changed)
+            self.settings_window.pages_changed.connect(self._pages_changed)
             self.settings_window.updates_changed.connect(self._updates_changed)
             self.settings_window.check_now.connect(self.check_releases)
             self.settings_window.show_page.connect(self.show_page)

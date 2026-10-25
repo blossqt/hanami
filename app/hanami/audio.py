@@ -1,4 +1,5 @@
-"""Windows' sound outputs: which there are, which one sound goes to, and moving it to another.
+"""Windows' sound outputs: which there are, which one sound goes to, and moving it to another -
+and its microphone, muted or not.
 
 Through Core Audio's COM interfaces, called with ctypes. Choosing the default
 output goes through IPolicyConfig - the interface Windows' own Sound settings
@@ -46,10 +47,11 @@ CLSID_MMDeviceEnumerator = GUID.of('BCDE0395-E52F-467C-8E3D-C4579291692E')
 IID_IMMDeviceEnumerator = GUID.of('A95664D2-9614-4F35-A746-DE8DB63617E6')
 CLSID_PolicyConfigClient = GUID.of('870AF99C-171D-4F9E-AF0D-E63DF40C2BC9')
 IID_IPolicyConfig = GUID.of('F8679F50-850A-41CF-9C72-430F290290C8')
+IID_IAudioEndpointVolume = GUID.of('5CDF2C82-841E-4546-9722-0CF74078229A')
 PKEY_Device_FriendlyName = PROPERTYKEY(GUID.of('A45C254E-DF1C-4EFD-8020-67D146A850E0'), 14)
 
 CLSCTX_ALL = 0x17
-E_RENDER = 0                    # outputs, not inputs
+E_RENDER, E_CAPTURE = 0, 1       # outputs; inputs (microphones)
 DEVICE_STATE_ACTIVE = 0x1
 ROLES = (0, 1, 2)               # eConsole, eMultimedia, eCommunications
 VT_LPWSTR = 31
@@ -182,3 +184,80 @@ def next_output(chosen: list[str]) -> Output | None:
     now = current()
     ids = [o.id for o in ring]
     return ring[(ids.index(now) + 1) % len(ring)] if now in ids else ring[0]
+
+
+# --------------------------------------------------------------------------- the microphone
+
+def _microphones(enumerator: ctypes.c_void_p) -> list[ctypes.c_void_p]:
+    """Windows' default microphone, and its default one for calls (as Discord uses) if that is
+    another - each an IMMDevice, to be released."""
+    found, ids = [], set()
+    for role in (0, 2):                                     # eConsole, eCommunications
+        device = ctypes.c_void_p()
+        try:
+            _call(enumerator, 4, E_CAPTURE, role, ctypes.byref(device),
+                  argtypes=(ctypes.c_int, ctypes.c_int, ctypes.c_void_p))               # GetDefaultAudioEndpoint
+        except OSError:
+            continue                                        # none plugged in
+        device_id = _device_id(device)
+        if device_id in ids:
+            _release(device)
+        else:
+            ids.add(device_id)
+            found.append(device)
+    return found
+
+
+def _volume(device: ctypes.c_void_p) -> ctypes.c_void_p:
+    volume = ctypes.c_void_p()
+    _call(device, 3, ctypes.byref(IID_IAudioEndpointVolume), CLSCTX_ALL, None, ctypes.byref(volume),
+          argtypes=(ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p, ctypes.c_void_p))    # IMMDevice::Activate
+    return volume
+
+
+def mic_muted() -> bool | None:
+    """Whether Windows' default microphone is muted - None with no microphone plugged in."""
+    try:
+        enumerator = _create(CLSID_MMDeviceEnumerator, IID_IMMDeviceEnumerator)
+    except OSError:
+        return None
+    try:
+        devices = _microphones(enumerator)
+        if not devices:
+            return None
+        try:
+            volume = _volume(devices[0])
+            try:
+                muted = wintypes.BOOL()
+                _call(volume, 15, ctypes.byref(muted), argtypes=(ctypes.c_void_p,))    # IAudioEndpointVolume::GetMute
+                return bool(muted.value)
+            finally:
+                _release(volume)
+        finally:
+            for device in devices:
+                _release(device)
+    finally:
+        _release(enumerator)
+
+
+def mute_mic(muted: bool) -> None:
+    """Mute the microphone, or not: Windows' default one, and its default one for calls if that is
+    another - so nothing hears it, whichever it records from."""
+    try:
+        enumerator = _create(CLSID_MMDeviceEnumerator, IID_IMMDeviceEnumerator)
+    except OSError as error:
+        raise AudioError(f'Windows would not find its microphone ({error})') from None
+    try:
+        devices = _microphones(enumerator)
+        try:
+            for device in devices:
+                volume = _volume(device)
+                try:
+                    _call(volume, 14, bool(muted), None, argtypes=(wintypes.BOOL, ctypes.c_void_p))   # SetMute
+                finally:
+                    _release(volume)
+        finally:
+            for device in devices:
+                _release(device)
+    finally:
+        _release(enumerator)

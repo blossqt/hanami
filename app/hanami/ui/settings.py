@@ -1,5 +1,6 @@
-"""Hanami's settings: starting with Windows, the suite's appearance (light or dark, its glass,
-its animations), keeping quiet for games, the sound-output hotkey, updates, and about Hanami.
+"""Hanami's settings: starting with Windows, the edge panel (its edge, its tab, what is pinned to
+it), the suite's appearance (light or dark, its glass, its animations), keeping quiet for games,
+the sound-output hotkey, updates, and about Hanami.
 
 The appearance is the whole suite's: what is chosen here is kept for every suite app
 (suitetheme.set_mode, set_look, set_motion), and each one running takes it within seconds.
@@ -9,12 +10,15 @@ from __future__ import annotations
 
 import math
 
+from pathlib import Path
+
 from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import (QColor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
                            QRadialGradient)
-from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QCheckBox, QComboBox, QFrame, QGridLayout,
-                               QHBoxLayout, QKeySequenceEdit, QLabel, QPushButton, QSlider, QStackedWidget,
-                               QVBoxLayout, QWidget)
+from PySide6.QtGui import QFontMetrics
+from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame,
+                               QGridLayout, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit, QPushButton, QScrollArea,
+                               QSlider, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import __version__
 from ..catalog import SUITE
@@ -341,16 +345,19 @@ class SettingsWindow(QWidget):
     output_chosen = Signal(str, str, str)           # 'speakers' or 'headphones', the output's id ('' for none), its name
     panel_changed = Signal(str)                     # the edge the panel slides out at: 'right', 'left' or '' (off)
     tab_changed = Signal(int, int, int)             # the panel's tab: its length and thickness (px), opacity at rest (%)
+    pins_changed = Signal(list)                     # the panel's shortcuts: [pins.Pin]
+    pages_changed = Signal(list)                    # the panel's pages: names from panel.PAGES, in order
     check_now = Signal()
     show_page = Signal(str)
     open_url = Signal(str)
 
-    PAGES = [('', 'General'), ('', 'Appearance'), ('', 'Games'), ('', 'Sound'), ('', 'Updates'),
+    PAGES = [('', 'General'), ('', 'Edge panel'), ('', 'Appearance'), ('', 'Games'), ('', 'Sound'), ('', 'Updates'),
              ('', 'About')]
 
     def __init__(self, start_with: list[str], starts_with_windows: bool, updates: tuple[bool, bool, bool],
                  sound: tuple[bool, str] = (True, ''), panel_edge: str = 'right',
-                 tab: tuple[int, int, int] | None = None):
+                 tab: tuple[int, int, int] | None = None, pinned: list | None = None,
+                 panel_pages: list[str] | None = None):
         super().__init__()
         self.setWindowTitle('Hanami settings')
         self.setWindowIcon(icons.app_icon())
@@ -375,7 +382,8 @@ class SettingsWindow(QWidget):
         side.addStretch(1)
         outer.addLayout(side)
         self.pages = QStackedWidget()
-        self.pages.addWidget(self._general(start_with, starts_with_windows, panel_edge, tab))
+        self.pages.addWidget(self._general(start_with, starts_with_windows))
+        self.pages.addWidget(self._scrolled(self._edge_panel(panel_edge, tab, list(pinned or []), panel_pages)))
         self.pages.addWidget(self._appearance())
         self.pages.addWidget(self._games())
         self.pages.addWidget(self._sound(*sound))
@@ -404,9 +412,7 @@ class SettingsWindow(QWidget):
             layout.addWidget(_label(about, 9, role='dim', wrap=True))
         return page, layout
 
-    def _general(self, start_with: list[str], starts_with_windows: bool, panel_edge: str = 'right',
-                 tab: tuple[int, int, int] | None = None) -> QWidget:
-        from .panel import TAB_LIMITS, TAB_LOOK          # (the panel's sound switch is drawn from here)
+    def _general(self, start_with: list[str], starts_with_windows: bool) -> QWidget:
         page, layout = self._page('General', '')
         frame, box = _section('Starting up')
         holder, self.startup = _switch('Start Hanami when I sign in to Windows',
@@ -430,11 +436,34 @@ class SettingsWindow(QWidget):
         box.addLayout(grid)
         self.startup.toggled.connect(self._startup_edited)
         layout.addWidget(frame)
+        frame, box = _section('The tray')
+        box.addWidget(_label('Closing Hanami’s window keeps it in the tray, as the blossom. Its menu holds each running '
+                             'app’s own menu, and Quit Hanami.', 9, role='dim', wrap=True))
+        layout.addWidget(frame)
+        layout.addStretch(1)
+        return page
+
+    @staticmethod
+    def _scrolled(page: QWidget) -> QScrollArea:
+        """A page taller than the window, in a scroll area of glass."""
+        page.setObjectName('scrolled')
+        area = QScrollArea()
+        area.setObjectName('scrolled')
+        area.setWidget(page)
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.NoFrame)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        return area
+
+    def _edge_panel(self, panel_edge: str, tab: tuple[int, int, int] | None, pinned: list,
+                    panel_pages: list[str] | None = None) -> QWidget:
+        from .panel import PAGES, TAB_LIMITS, TAB_LOOK          # (the panel's sound switch is drawn from here)
+        page, layout = self._page('Edge panel', '')
         frame, box = _section('Edge panel')
         holder, self.panel_on = _switch('Slide out a panel at the edge of the screen',
                                         'A little tab at the edge shows where it is: rest the pointer on it, or click '
-                                        'it. Drag the tab, or the panel’s handle, to move it. It holds the suite’s apps '
-                                        'and the sound switch, and keeps away from games and anything full screen.',
+                                        'it. Drag the tab, or the panel’s handle, to move it. Scroll on the panel to '
+                                        'turn its pages. It keeps away from games and anything full screen.',
                                         bool(panel_edge))
         self.panel_on.toggled.connect(self._panel_edited)
         box.addWidget(holder)
@@ -454,6 +483,20 @@ class SettingsWindow(QWidget):
             row.addWidget(button)
         row.addStretch(1)
         box.addLayout(row)
+        layout.addWidget(frame)
+        frame, box = _section('Pages')
+        chosen = panel_pages if panel_pages else list(PAGES)
+        self.page_switches: dict[str, QCheckBox] = {}
+        for name, title, about in (
+                ('apps', 'Hanami suite', ''), ('pinned', 'Shortcuts', ''),
+                ('stats', 'Stats', 'The processor and memory - and, with an NVIDIA graphics card, its load, memory '
+                                   'and temperature.')):
+            holder, check = _switch(title, about, name in chosen)
+            check.toggled.connect(self._pages_edited)
+            box.addWidget(holder)
+            self.page_switches[name] = check
+        layout.addWidget(frame)
+        frame, box = _section('Tab')
         grid = QGridLayout()
         grid.setContentsMargins(0, 4, 0, 0)
         grid.setHorizontalSpacing(12)
@@ -477,11 +520,38 @@ class SettingsWindow(QWidget):
             self.tab_sliders[name] = slider
         grid.setColumnStretch(1, 1)
         box.addLayout(grid)
-        self._panel_edited(emit=False)
         layout.addWidget(frame)
-        frame, box = _section('The tray')
-        box.addWidget(_label('Closing Hanami’s window keeps it in the tray, as the blossom. Its menu holds each running '
-                             'app’s own menu, and Quit Hanami.', 9, role='dim', wrap=True))
+        frame, box = _section('Shortcuts')
+        self.pinned = pinned
+        self._pin_rows = QVBoxLayout()
+        self._pin_rows.setSpacing(6)
+        box.addLayout(self._pin_rows)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self.add_file = QPushButton('Add a program or file…')
+        self.add_file.clicked.connect(self._choose_file)
+        self.add_folder = QPushButton('Add a folder…')
+        self.add_folder.clicked.connect(self._choose_folder)
+        for button in (self.add_file, self.add_folder):
+            button.setCursor(Qt.PointingHandCursor)
+            row.addWidget(button)
+        row.addStretch(1)
+        box.addLayout(row)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self.address = QLineEdit()
+        self.address.setPlaceholderText('Website address')
+        self.address.returnPressed.connect(self._add_website)
+        self.add_site = QPushButton('Add website')
+        self.add_site.setCursor(Qt.PointingHandCursor)
+        self.add_site.clicked.connect(self._add_website)
+        row.addWidget(self.address, 1)
+        row.addWidget(self.add_site)
+        box.addLayout(row)
+        self.pin_note = _label('', 8.5, role='dim', wrap=True)
+        box.addWidget(self.pin_note)
+        self._show_pinned()
+        self._panel_edited(emit=False)
         layout.addWidget(frame)
         layout.addStretch(1)
         return page
@@ -714,13 +784,103 @@ class SettingsWindow(QWidget):
         on = self.panel_on.isChecked()
         for button in [*self.edge_buttons.values(), *self.tab_sliders.values()]:
             button.setEnabled(on)
+        if hasattr(self, 'pin_note'):
+            self._show_pinned(self.pin_note.text() if self.pin_note.isVisible() else '')
+        if hasattr(self, 'page_switches'):
+            self._pages_edited(emit=False)
         edge = next((name for name, button in self.edge_buttons.items() if button.isChecked()), 'right')
         if emit:
             self.panel_changed.emit(edge if on else '')
 
+    def _pages_edited(self, *_, emit: bool = True) -> None:
+        """The panel's pages: at least one stays - the last one on can't be turned off."""
+        names = [name for name, check in self.page_switches.items() if check.isChecked()]
+        on = self.panel_on.isChecked()
+        for check in self.page_switches.values():
+            check.setEnabled(on and not (check.isChecked() and len(names) == 1))
+        if emit and names:
+            self.pages_changed.emit(names)
+
     def _tab_edited(self) -> None:
         s = self.tab_sliders
         self.tab_changed.emit(s['length'].value(), s['thickness'].value(), s['opacity'].value())
+
+    # ------------------------------------------------------------------ what is pinned
+
+    def _show_pinned(self, note: str = '') -> None:
+        """The list of what is pinned - each with its icon, where it is and a button to unpin it -
+        and the buttons to pin more, while there is room."""
+        from . import pins
+        while self._pin_rows.count():
+            item = self._pin_rows.takeAt(0)
+            if item.widget() is not None:
+                item.widget().hide()                # at once: deleted only once Qt next gets round to it
+                item.widget().deleteLater()
+        ratio = self.devicePixelRatioF()
+        for index, pin in enumerate(self.pinned):
+            row = QWidget()
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(10)
+            icon = QLabel()
+            icon.setPixmap(pins.icon(pin, 20, ratio))
+            line.addWidget(icon)
+            line.addWidget(_label(pin.name, 9.5))
+            where = _label('', 8.5, role='dim')
+            where.setText(QFontMetrics(where.font()).elidedText(pin.target, Qt.ElideMiddle, 300))
+            line.addWidget(where, 1)
+            remove = QPushButton('Remove')
+            remove.setCursor(Qt.PointingHandCursor)
+            remove.setAccessibleName(f'Remove {pin.name}')
+            remove.clicked.connect(lambda _=False, i=index: self._remove_pin(i))
+            line.addWidget(remove)
+            self._pin_rows.addWidget(row)
+        if not self.pinned:
+            self._pin_rows.addWidget(_label('No shortcuts yet.', 9, role='dim'))
+        room = len(self.pinned) < pins.MOST
+        for widget in (self.add_file, self.add_folder, self.address, self.add_site):
+            widget.setEnabled(room and self.panel_on.isChecked())
+        self.pin_note.setText(note or ('' if room else f'The panel holds {pins.MOST}.'))
+        self.pin_note.setVisible(bool(self.pin_note.text()))
+
+    def _pin(self, pin) -> None:
+        from . import pins
+        if any(p.kind == pin.kind and p.target.lower() == pin.target.lower() for p in self.pinned):
+            self._show_pinned(f'{pin.name} is there already.')
+            return
+        if len(self.pinned) >= pins.MOST:
+            return
+        self.pinned = self.pinned + [pin]
+        self.pins_changed.emit(list(self.pinned))
+        self._show_pinned()
+
+    def _remove_pin(self, index: int) -> None:
+        self.pinned = [pin for i, pin in enumerate(self.pinned) if i != index]
+        self.pins_changed.emit(list(self.pinned))
+        self._show_pinned()
+
+    def _choose_file(self) -> None:
+        from . import pins
+        # A shortcut stays a shortcut: Discord's, say, starts it through its updater.
+        path, _ = QFileDialog.getOpenFileName(self, 'Add a program or file', str(Path.home() / 'Desktop'),
+                                              'All files (*)', options=QFileDialog.DontResolveSymlinks)
+        if path:
+            self._pin(pins.for_path(path))
+
+    def _choose_folder(self) -> None:
+        from . import pins
+        path = QFileDialog.getExistingDirectory(self, 'Add a folder', str(Path.home()))
+        if path:
+            self._pin(pins.for_path(path))
+
+    def _add_website(self) -> None:
+        from . import pins
+        pin = pins.for_address(self.address.text())
+        if pin is None:
+            self._show_pinned('That isn’t a website address.' if self.address.text().strip() else '')
+            return
+        self.address.clear()
+        self._pin(pin)
 
     def _sound_edited(self, *_) -> None:
         keys = self.sound_key.keySequence()
@@ -774,6 +934,7 @@ class SettingsWindow(QWidget):
         return theme.card_style() + theme.panel_css('QFrame#section', 12) + f"""
             QWidget#settings {{ background: {theme.css(c.card)}; }}
             QStackedWidget, QStackedWidget > QWidget {{ background: transparent; }}
+            QScrollArea#scrolled, QScrollArea#scrolled > QWidget, QWidget#scrolled {{ background: transparent; }}
             QSlider {{ min-height: 22px; background: transparent; }}
             QSlider::groove:horizontal {{ height: 4px; border-radius: 2px; background: {theme.css(c.border)}; }}
             QSlider::sub-page:horizontal {{ height: 4px; border-radius: 2px; background: {theme.ACCENT}; }}

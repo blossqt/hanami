@@ -1,5 +1,10 @@
 """The edge panel: rest the pointer on the little tab at the screen's edge (or click it), and a pane
-of glass slides out there over a photo of blossom, holding the suite's apps and the sound switch.
+of glass slides out there over a photo of blossom. It has three pages, turned with the scroll wheel
+(or the dots along its bottom, showing which is in sight): the suite's apps, what is pinned to it
+in Settings (programs, files, folders, websites), and how busy the PC is (stats.py) - sampled once a
+second only while that page is in sight. Under them, on every page, the sound button and the
+microphone's mute button.
+
 The tab shows where the panel is, as Samsung's edge panel's does. It sits in the middle of the edge
 until it is moved - the tab dragged up or down, or the handle along the panel's top (place: where
 along the edge its middle is, as a share of the screen's height). The tab keeps out of the way of
@@ -7,10 +12,11 @@ games and anything else full screen (quiet), and of the panel itself while that 
 
 The pointer need not be right against the edge: anywhere within NEAR of it, beside where the panel
 sits, will do. Only an edge with no screen beyond it counts - passing through to another screen
-never brings the panel out - and the pointer has to stay a moment (DWELL), with no button held, and not over a game or anything else full screen (quiet, as Hanami says). While one
-of those is in front, the panel doesn't watch the pointer at all: it only looks, now and then
-(QUIET_EVERY), for it to go. It slides away once the pointer has left it for a moment (LEAVE), and
-after a choice in it.
+never brings the panel out - and the pointer has to stay a moment (DWELL), with no button held,
+and not over a game or anything else full screen (quiet, as Hanami says). While one of those is
+in front, the panel doesn't watch the pointer at all: it only looks, now and then (QUIET_EVERY),
+for it to go. It slides away once the pointer has left it for a moment (LEAVE), and after a
+choice in it.
 """
 
 from __future__ import annotations
@@ -20,16 +26,22 @@ from pathlib import Path
 
 from PySide6.QtCore import (QEasingCurve, QPoint, QPointF, QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer,
                             QVariantAnimation, Signal)
-from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QToolTip, QVBoxLayout, QWidget
+from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QToolTip, QVBoxLayout, QWidget
 
 from .. import win32
 from . import icons, theme
-from .sound import SoundToggle
+from .pins import MOST as PINS_MOST
+from .sound import MicButton, SoundToggle
 
 PHOTO = str(Path(__file__).with_name('panel.jpg'))     # Yan Liu's blossom, on Unsplash
-WIDTH = 106
+WIDTH = 140
 ICON = 48
+INNER = WIDTH - 2 * 12  # within its margins
+PIN_ICON = 40
+PIN_TILE = (INNER - 4) // 2
+PAGES = ('apps', 'pinned', 'stats')    # the Hanami suite, shortcuts, stats: those chosen are shown, in this order
+STATS_EVERY = 1000      # ms between samples, while the stats page is in sight
 MARGIN = 10             # between the panel and the screen's edge
 NEAR = 48               # px in from the screen's edge that count as at it
 DWELL = 0.3             # s the pointer rests at the edge before the panel comes out
@@ -209,13 +221,14 @@ class _Handle(QWidget):
 
 
 class _AppButton(QWidget):
-    """One app: its icon, lifting as the pointer comes over it, a dot under it while it runs."""
+    """One app (or something pinned): its icon, lifting as the pointer comes over it, a dot under it
+    while it runs."""
     clicked = Signal(str)
 
-    def __init__(self, name: str, icon: QPixmap, running: bool, parent=None):
+    def __init__(self, name: str, icon: QPixmap, running: bool, parent=None, size: int = ICON, width: int = INNER):
         super().__init__(parent)
-        self.name, self.icon, self.running = name, icon, running
-        self.setFixedSize(WIDTH - 2 * 12, ICON + 14)
+        self.name, self.icon, self.running, self.size_ = name, icon, running, size
+        self.setFixedSize(width, size + 14)
         self.setCursor(Qt.PointingHandCursor)
         self.setAccessibleName(name)
         self._lift = 0.0
@@ -251,8 +264,8 @@ class _AppButton(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        size = ICON * (1 + 0.1 * self._lift)
-        box = QRectF((self.width() - size) / 2, 4 - 3 * self._lift + (ICON - size) / 2, size, size)
+        size = self.size_ * (1 + 0.1 * self._lift)
+        box = QRectF((self.width() - size) / 2, 4 - 3 * self._lift + (self.size_ - size) / 2, size, size)
         theme.paint_shadow(painter, box, size * 42 / 192, 6, QColor(60, 20, 40, int(50 + 40 * self._lift)))
         painter.drawPixmap(box, self.icon, QRectF(self.icon.rect()))
         if self.running:
@@ -262,9 +275,247 @@ class _AppButton(QWidget):
         painter.end()
 
 
+class _AddButton(QWidget):
+    """After what is pinned: a plus, opening Settings to pin something more."""
+    clicked = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(PIN_TILE, PIN_ICON + 14)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAccessibleName('Pin something')
+        self._hover = False
+
+    def enterEvent(self, event):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
+
+    def paintEvent(self, event):
+        c = theme.colors()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        box = QRectF((self.width() - PIN_ICON) / 2 + 0.5, 4.5, PIN_ICON - 1, PIN_ICON - 1)
+        color = QColor(c.text if self._hover else c.dim)
+        color.setAlphaF(0.9 if self._hover else 0.6)
+        painter.setPen(QPen(color, 1.2, Qt.DashLine))
+        painter.setBrush(QColor(255, 255, 255, 30) if self._hover else Qt.NoBrush)
+        painter.drawRoundedRect(box, PIN_ICON * 42 / 192, PIN_ICON * 42 / 192)
+        painter.setPen(QPen(color, 1.8, Qt.SolidLine, Qt.RoundCap))
+        middle, arm = box.center(), PIN_ICON * 0.18
+        painter.drawLine(QPointF(middle.x() - arm, middle.y()), QPointF(middle.x() + arm, middle.y()))
+        painter.drawLine(QPointF(middle.x(), middle.y() - arm), QPointF(middle.x(), middle.y() + arm))
+        painter.end()
+
+
+class _Stat(QWidget):
+    """One of the PC's stats: its name and value on a line, and under them (bar) a bar showing how
+    busy or how full - gliding to each new value."""
+
+    def __init__(self, name: str, bar: bool = True):
+        super().__init__()
+        self.name, self.bar = name, bar
+        self.value, self.share = '–', 0.0
+        self._glide: QVariantAnimation | None = None
+        self.setFixedSize(INNER, 30 if bar else 20)
+        self.setAccessibleName(name)
+
+    def set_value(self, value: str, share: float | None = None) -> None:
+        self.value = value
+        self.setAccessibleDescription(value)
+        if share is None or not self.bar:
+            self.update()
+            return
+        share = max(0.0, min(1.0, share))
+        if self._glide is not None:
+            self._glide.stop()
+        if not theme.motion_on() or not self.isVisible():
+            self.share = share
+            self.update()
+            return
+        glide = self._glide = QVariantAnimation(self)
+        glide.setDuration(400)
+        glide.setEasingCurve(QEasingCurve.OutCubic)
+        glide.setStartValue(self.share)
+        glide.setEndValue(share)
+        glide.valueChanged.connect(lambda v: (setattr(self, 'share', float(v)), self.update()))
+        glide.start()
+
+    def paintEvent(self, event):
+        c = theme.colors()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        line = QRectF(0, 0, self.width(), 18)
+        painter.setFont(theme.font(8.5))
+        painter.setPen(c.dim)
+        painter.drawText(line, Qt.AlignLeft | Qt.AlignVCenter, self.name)
+        painter.setFont(theme.font(9.5, QFont.DemiBold))
+        painter.setPen(c.text)
+        painter.drawText(line, Qt.AlignRight | Qt.AlignVCenter, self.value)
+        if self.bar:
+            track = QRectF(0, 22, self.width(), 5)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(c.border)
+            painter.drawRoundedRect(track, 2.5, 2.5)
+            if self.share > 0:
+                painter.setBrush(QColor(theme.ACCENT))
+                painter.drawRoundedRect(QRectF(track.x(), track.y(), max(5.0, track.width() * self.share), 5), 2.5, 2.5)
+        painter.end()
+
+
+class _Pages(QWidget):
+    """The panel's pages, side by side: one in sight, the next sliding in from beside it - only
+    those turned on (shown: their indexes, in order). As big as the biggest of them, so the panel
+    keeps its size from page to page."""
+    changed = Signal(int)               # the page now in sight, by its place among those shown
+
+    def __init__(self):
+        super().__init__()
+        self.pages: list[QWidget] = []
+        self.shown: list[int] = []
+        self.current = 0                # the page in sight, by its index among them all
+        self._slide: QVariantAnimation | None = None
+
+    def add(self, page: QWidget) -> None:
+        page.setParent(self)
+        page.setVisible(not self.pages)
+        self.shown.append(len(self.pages))
+        self.pages.append(page)
+
+    def show_only(self, shown: list[int]) -> None:
+        """Have only these pages (indexes, in order) - the one in sight stays, if it is one of them."""
+        self.shown = [index for index in shown if 0 <= index < len(self.pages)] or [0]
+        if self.current not in self.shown:
+            self.current = self.shown[0]
+        self.refit()
+
+    @property
+    def position(self) -> int:
+        """The page in sight, by its place among those shown."""
+        return self.shown.index(self.current) if self.current in self.shown else 0
+
+    def sizeHint(self) -> QSize:
+        hints = [self.pages[index].sizeHint() for index in self.shown] or [QSize(0, 0)]
+        return QSize(max(h.width() for h in hints), max(h.height() for h in hints))
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    def refit(self) -> None:
+        """A page's contents changed: the pages take the size of the biggest again. (Each page's
+        layout reckons its size now - left to itself, it would only once Qt next gets round to it.)"""
+        for page in self.pages:
+            if page.layout() is not None:
+                page.layout().invalidate()
+                page.layout().activate()
+        self.updateGeometry()
+        self._place()
+
+    def resizeEvent(self, event):
+        self._place()
+
+    def _place(self) -> None:
+        if self._slide is not None:
+            self._slide.stop()
+            self._slide = None
+        for index, page in enumerate(self.pages):
+            page.setGeometry(0, 0, self.width(), self.height())
+            page.setVisible(index == self.current)
+
+    def go(self, position: int) -> None:
+        """Turn to the page at that place among those shown - sliding, from the side it lies on."""
+        position = max(0, min(len(self.shown) - 1, position))
+        index = self.shown[position]
+        if index == self.current:
+            return
+        old, new = self.pages[self.current], self.pages[index]
+        way = 1 if index > self.current else -1
+        self.current = index
+        self.changed.emit(position)
+        if not theme.motion_on() or not self.isVisible():
+            self._place()
+            return
+        if self._slide is not None:
+            self._slide.stop()
+        for page in self.pages:
+            if page not in (old, new):
+                page.hide()
+        width = self.width()
+        new.setGeometry(way * width, 0, width, self.height())
+        new.show()
+        slide = self._slide = QVariantAnimation(self)
+        slide.setDuration(300)
+        slide.setEasingCurve(QEasingCurve.OutCubic)
+        slide.setStartValue(0.0)
+        slide.setEndValue(1.0)
+        slide.valueChanged.connect(lambda t: (old.move(round(-way * width * t), 0),
+                                              new.move(round(way * width * (1 - t)), 0)))
+        slide.finished.connect(self._place)
+        slide.start()
+
+
+class _Dots(QWidget):
+    """Which page is in sight: a dot for each, the one in sight a pink capsule. Clicked, a dot turns
+    to its page."""
+    chosen = Signal(int)
+    GAP = 12
+
+    def __init__(self, count: int):
+        super().__init__()
+        self.count, self.current = count, 0
+        self.setFixedSize(INNER, 10)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def set_current(self, index: int) -> None:
+        self.current = index
+        self.update()
+
+    def set_count(self, count: int) -> None:
+        self.count = count
+        self.current = min(self.current, count - 1)
+        self.setVisible(count > 1)
+        self.update()
+
+    def _x(self, index: int) -> float:
+        return self.width() / 2 + (index - (self.count - 1) / 2) * self.GAP
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            x = event.position().x()
+            self.chosen.emit(min(range(self.count), key=lambda i: abs(self._x(i) - x)))
+
+    def paintEvent(self, event):
+        c = theme.colors()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        middle = self.height() / 2
+        for index in range(self.count):
+            if index == self.current:
+                painter.setPen(QPen(c.edge, 1))
+                painter.setBrush(QColor(theme.ACCENT))
+                painter.drawRoundedRect(QRectF(self._x(index) - 6, middle - 3, 12, 6), 3, 3)
+            else:
+                dot = QColor(c.dim)
+                dot.setAlphaF(0.55)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(dot)
+                painter.drawEllipse(QPointF(self._x(index), middle), 2.5, 2.5)
+        painter.end()
+
+
 class EdgePanel(QWidget):
     open_app = Signal(str)
     open_hanami = Signal()
+    open_pin = Signal(int)              # what is pinned, by its place on the page
+    add_pins = Signal()                 # the plus after them: to Settings, to pin something
+    mic_clicked = Signal()
     moved = Signal(float)               # dropped by its handle: where along the edge it is now (place)
     output_clicked = Signal(str)        # 'speakers' or 'headphones'
     showing = Signal()                  # about to come out: the apps and the sound, as they are now
@@ -287,26 +538,70 @@ class EdgePanel(QWidget):
         self._left_at: float | None = None
         self._sliding: QPropertyAnimation | None = None
         self._leaving = False
+        self.stats_source = None        # what samples the PC's stats (stats.Sampler.take), once a second
+        self._wheel, self._wheel_at = 0, 0.0
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 4, 12, 14)
+        layout.setContentsMargins(12, 4, 12, 8)
         layout.setSpacing(8)
         self.handle = _Handle()
         self.handle.dragged.connect(self._drag_to)
         self.handle.dropped.connect(self._dropped)
         layout.addWidget(self.handle, 0, Qt.AlignHCenter)
         layout.addSpacing(-4)
+        self.pages = _Pages()
+        apps_page = QWidget()
+        apps = QVBoxLayout(apps_page)
+        apps.setContentsMargins(0, 0, 0, 0)
+        apps.setSpacing(4)
         self.hanami = _AppButton('Hanami', icons.render_app_icon(ICON), False)
         self.hanami.clicked.connect(lambda _: self._chose(self.open_hanami.emit))
-        layout.addWidget(self.hanami, 0, Qt.AlignHCenter)
+        apps.addWidget(self.hanami, 0, Qt.AlignHCenter)
         self._apps = QVBoxLayout()
         self._apps.setSpacing(4)
-        layout.addLayout(self._apps)
-        layout.addSpacing(6)
+        apps.addLayout(self._apps)
+        apps.addStretch(1)
+        self.pages.add(apps_page)
+        pins_page = QWidget()
+        self._pins = QGridLayout(pins_page)
+        self._pins.setContentsMargins(0, 0, 0, 0)
+        self._pins.setHorizontalSpacing(4)
+        self._pins.setVerticalSpacing(4)
+        self._pins.setAlignment(Qt.AlignTop)
+        self.pages.add(pins_page)
+        stats_page = QWidget()
+        stats = QVBoxLayout(stats_page)
+        stats.setContentsMargins(0, 4, 0, 0)
+        stats.setSpacing(10)
+        self.stat_rows = {key: _Stat(name, bar) for key, name, bar in (
+            ('cpu', 'CPU', True), ('ram', 'RAM', True), ('gpu', 'GPU', True), ('vram', 'VRAM', True),
+            ('gpu_temp', 'GPU temp', False))}
+        for row in self.stat_rows.values():
+            stats.addWidget(row)
+        stats.addStretch(1)
+        self.pages.add(stats_page)
+        self.pages.changed.connect(self._page_turned)
+        layout.addWidget(self.pages)
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        row.addStretch(1)
         self.sound = SoundToggle()
+        self.sound.setFixedSize(INNER - MicButton.SIZE - 6, MicButton.SIZE)
         self.sound.chosen.connect(self.output_clicked)
-        layout.addWidget(self.sound, 0, Qt.AlignHCenter)
+        row.addWidget(self.sound)
+        self.mic = MicButton()
+        self.mic.clicked.connect(self.mic_clicked)
+        row.addWidget(self.mic)
+        row.addStretch(1)
+        layout.addLayout(row)
+        self.dots = _Dots(len(PAGES))             # at the very bottom: which page is in sight
+        self.dots.chosen.connect(self.pages.go)
+        layout.addWidget(self.dots, 0, Qt.AlignHCenter)
         self.buttons: dict[str, _AppButton] = {}
+        self.pin_buttons: list[QWidget] = []
+        self._stats = QTimer(self)
+        self._stats.setInterval(STATS_EVERY)
+        self._stats.timeout.connect(self._sample)
 
         self._watch = QTimer(self)
         self._watch.setInterval(WATCH_MS)
@@ -325,6 +620,7 @@ class EdgePanel(QWidget):
         """The apps on this PC: (name, icon, running)."""
         for button in self.buttons.values():
             self._apps.removeWidget(button)
+            button.hide()
             button.deleteLater()
         self.buttons = {}
         for name, icon, running in apps:
@@ -332,7 +628,103 @@ class EdgePanel(QWidget):
             button.clicked.connect(lambda n: self._chose(lambda: self.open_app.emit(n)))
             self.buttons[name] = button
             self._apps.addWidget(button, 0, Qt.AlignHCenter)
+        self.pages.refit()
         self.adjustSize()
+
+    def show_pins(self, pins: list[tuple[str, QPixmap]]) -> None:
+        """What is pinned: (name, icon), two by two - then a plus, while there is room for more."""
+        for button in self.pin_buttons:
+            self._pins.removeWidget(button)
+            button.hide()
+            button.deleteLater()
+        self.pin_buttons = []
+        for index, (name, icon) in enumerate(pins[:PINS_MOST]):
+            button = _AppButton(name, icon, False, size=PIN_ICON, width=PIN_TILE)
+            button.clicked.connect(lambda _, i=index: self._chose(lambda: self.open_pin.emit(i)))
+            self.pin_buttons.append(button)
+        if len(pins) < PINS_MOST:
+            more = _AddButton()
+            more.clicked.connect(lambda: self._chose(self.add_pins.emit))
+            self.pin_buttons.append(more)
+        for index, button in enumerate(self.pin_buttons):
+            self._pins.addWidget(button, index // 2, index % 2)
+        self.pages.refit()
+        self.adjustSize()
+
+    def show_mic(self, muted: bool | None) -> None:
+        """The microphone: muted or not - None with none plugged in."""
+        self.mic.show_muted(muted)
+
+    def show_stats(self, stats) -> None:
+        """A sample of the PC's stats (stats.Stats); the graphics card's only with NVIDIA's driver."""
+        gb = 1024 ** 3
+        rows = self.stat_rows
+        rows['cpu'].set_value('…' if stats.cpu is None else f'{stats.cpu:.0f}%',
+                              None if stats.cpu is None else stats.cpu / 100)
+        used, total = stats.ram
+        rows['ram'].set_value(f'{used / gb:.1f}/{total / gb:.0f} GB', used / total if total else 0.0)
+        card = stats.gpu is not None or stats.vram is not None or stats.gpu_temp is not None
+        for key in ('gpu', 'vram', 'gpu_temp'):
+            rows[key].setVisible(card)
+        if stats.gpu is not None:
+            rows['gpu'].set_value(f'{stats.gpu:.0f}%', stats.gpu / 100)
+        if stats.vram is not None and stats.vram[1]:
+            rows['vram'].set_value(f'{stats.vram[0] / gb:.1f}/{stats.vram[1] / gb:.0f} GB', stats.vram[0] / stats.vram[1])
+        if stats.gpu_temp is not None:
+            rows['gpu_temp'].set_value(f'{stats.gpu_temp}°C')
+
+    # ------------------------------------------------------------------ its pages
+
+    def set_pages(self, names: list[str]) -> None:
+        """Which pages it has (of PAGES), as chosen in Settings - always in PAGES' order. With just
+        one, there are no dots."""
+        self.pages.show_only([index for index, name in enumerate(PAGES) if name in names])
+        self.dots.set_count(len(self.pages.shown))
+        self.dots.set_current(self.pages.position)
+        self._watch_stats()
+        self.adjustSize()
+
+    def wheelEvent(self, event):
+        """The scroll wheel turns the pages - a notch a page, down to the next; a touchpad's
+        scrolling, once it adds up to a notch."""
+        delta = event.angleDelta().y() or event.angleDelta().x()
+        now = time.monotonic()
+        if now - self._wheel_at > 0.4:
+            self._wheel = 0
+        self._wheel_at = now
+        self._wheel += delta
+        if abs(self._wheel) >= 120:
+            self.pages.go(self.pages.position + (1 if self._wheel < 0 else -1))
+            self._wheel = 0
+        event.accept()
+
+    def _page_turned(self, index: int) -> None:
+        self.dots.set_current(index)
+        self._watch_stats()
+
+    def _watch_stats(self) -> None:
+        """Sample the PC's stats once a second - only while their page is in sight."""
+        wanted = (self.isVisible() and not self._leaving and PAGES[self.pages.current] == 'stats'
+                  and self.stats_source is not None)
+        if wanted and not self._stats.isActive():
+            self._sample()
+            self._stats.start()
+        elif not wanted:
+            self._stats.stop()
+
+    def _sample(self) -> None:
+        try:
+            self.show_stats(self.stats_source())
+        except Exception:                   # noqa: BLE001 - a sample that fails leaves the last one
+            pass
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, self._watch_stats)
+
+    def hideEvent(self, event):
+        self._stats.stop()
+        super().hideEvent(event)
 
     def _chose(self, then) -> None:
         then()
@@ -519,6 +911,7 @@ class EdgePanel(QWidget):
         if not self.isVisible() or self._leaving:
             return
         self._leaving = True
+        self._stats.stop()
         QToolTip.hideText()
         screen = QGuiApplication.screenAt(self.frameGeometry().center())
         if not theme.motion_on() or screen is None:
