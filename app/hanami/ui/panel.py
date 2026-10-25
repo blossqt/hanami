@@ -2,8 +2,9 @@
 of glass slides out there over a photo of blossom. It has three pages, turned with the scroll wheel
 (or the dots along its bottom, showing which is in sight): the suite's apps, what is pinned to it
 in Settings (programs, files, folders, websites), and how busy the PC is (stats.py) - sampled once a
-second only while that page is in sight. Under them, on every page, a brightness slider for each
-monitor that has one (brightness.py), then the sound button and the microphone's mute button.
+second only while that page is in sight. Under them, on every page, a Brightness row that drops
+down a slider for each monitor that has one (brightness.py) - the panel growing to hold them, and
+folding them away again as it goes - then the sound button and the microphone's mute button.
 
 The tab shows where the panel is, as Samsung's edge panel's does. It sits in the middle of the edge
 until it is moved - the tab dragged up or down, or the handle along the panel's top (place: where
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QToolTip, QVBoxLayout, Q
 from .. import win32
 from . import icons, theme
 from .pins import MOST as PINS_MOST
+from .settings import glyph_font
 from .sound import MicButton, SoundToggle
 
 PHOTO = str(Path(__file__).with_name('panel.jpg'))     # Yan Liu's blossom, on Unsplash
@@ -46,7 +48,9 @@ STATS_QUICK = 250, 2.0  # ms between samples, for the first s of it: so the proc
                         # shows as soon as Hanami Sensors has it, when it has just been started
 SET_HELD = 2.0          # s after a brightness slider is moved during which a reading doesn't move it back
                         # (the reading may be from before)
-MARGIN = 10            # between the panel and the screen's edge
+FOLD_MS = 220           # the brightness sliders dropping down, or folding away
+SUN, CHEVRON = '', ''      # Segoe Fluent Icons: Brightness, ChevronDown
+MARGIN = 10           # between the panel and the screen's edge
 NEAR = 48               # px in from the screen's edge that count as at it
 DWELL = 0.3             # s the pointer rests at the edge before the panel comes out
 LEAVE = 0.45            # s after the pointer leaves it before it slides away
@@ -462,6 +466,63 @@ class _Brightness(QWidget):
         painter.end()
 
 
+class _Fold(QWidget):
+    """The Brightness row: a sun, its name and a chevron. Clicked, the brightness sliders drop down
+    under it, or fold away; the chevron turns with them (opened: 0 folded, 1 down)."""
+    clicked = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(INNER, 28)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAccessibleName('Brightness')
+        self.setAccessibleDescription('folded')
+        self.opened = 0.0
+        self._hover = False
+
+    def set_opened(self, opened: float) -> None:
+        self.opened = opened
+        self.setAccessibleDescription('open' if opened > 0.5 else 'folded')
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
+
+    def enterEvent(self, event):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self.update()
+
+    def paintEvent(self, event):
+        c = theme.colors()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        bend = r.height() / 2 if theme.look() == 'liquid' and theme.glass_on() else 9
+        shape = QPainterPath()
+        shape.addRoundedRect(r, bend, bend)
+        painter.fillPath(shape, c.chip)
+        if self._hover:
+            painter.fillPath(shape, QColor(255, 255, 255, 40 if theme.is_dark() else 120))
+        painter.setPen(QPen(c.border, 1))
+        painter.drawPath(shape)
+        painter.setPen(c.text)
+        painter.setFont(glyph_font(11))
+        painter.drawText(QRectF(8, 0, 18, self.height()), Qt.AlignCenter, SUN)
+        painter.setFont(theme.font(8.5))
+        painter.drawText(QRectF(30, 0, self.width() - 56, self.height()), Qt.AlignLeft | Qt.AlignVCenter, 'Brightness')
+        painter.setPen(c.dim)
+        painter.setFont(glyph_font(8))
+        painter.translate(self.width() - 15, self.height() / 2)
+        painter.rotate(180 * self.opened)
+        painter.drawText(QRectF(-8, -8, 16, 16), Qt.AlignCenter, CHEVRON)
+        painter.end()
+
+
 class _Pages(QWidget):
     """The panel's pages, side by side: one in sight, the next sliding in from beside it - only
     those turned on (shown: their indexes, in order). As big as the biggest of them, so the panel
@@ -521,14 +582,15 @@ class _Pages(QWidget):
             page.setGeometry(0, 0, self.width(), self.height())
             page.setVisible(index == self.current)
 
-    def go(self, position: int) -> None:
-        """Turn to the page at that place among those shown - sliding, from the side it lies on."""
+    def go(self, position: int, way: int = 0) -> None:
+        """Turn to the page at that place among those shown - sliding, from the side it lies on
+        (or way: 1 from the right, -1 from the left, as when the wheel wraps round)."""
         position = max(0, min(len(self.shown) - 1, position))
         index = self.shown[position]
         if index == self.current:
             return
         old, new = self.pages[self.current], self.pages[index]
-        way = 1 if index > self.current else -1
+        way = way or (1 if index > self.current else -1)
         self.current = index
         self.changed.emit(position)
         if not theme.motion_on() or not self.isVisible():
@@ -675,13 +737,21 @@ class EdgePanel(QWidget):
         self.pages.add(stats_page)
         self.pages.changed.connect(self._page_turned)
         layout.addWidget(self.pages)
-        self.screens = QWidget()                    # a brightness slider for each monitor that has one
-        self._screens = QVBoxLayout(self.screens)
+        self.fold = _Fold()                         # the Brightness row: the sliders drop down under it
+        self.fold.clicked.connect(lambda: self._fold_to(not self.screens_open))
+        self.fold.hide()
+        layout.addWidget(self.fold)
+        self.screens = QWidget()                    # as much of the sliders as has dropped down
+        self.screens.hide()
+        self._sliders = QWidget(self.screens)       # a brightness slider for each monitor that has one
+        self._sliders.setFixedWidth(INNER)
+        self._screens = QVBoxLayout(self._sliders)
         self._screens.setContentsMargins(0, 0, 0, 0)
         self._screens.setSpacing(4)
-        self.screens.hide()
         self.brightness_rows: list[_Brightness] = []
         self._brightness_on = True
+        self.screens_open = False
+        self._folding: QVariantAnimation | None = None
         layout.addWidget(self.screens)
         row = QHBoxLayout()
         row.setSpacing(6)
@@ -770,14 +840,68 @@ class EdgePanel(QWidget):
             row.changed.connect(self.brightness_set)
             self.brightness_rows.append(row)
             self._screens.addWidget(row)
-        self.screens.setVisible(self._brightness_on and bool(monitors))
-        self.adjustSize()
+        self._screens.activate()
+        self._sliders.adjustSize()
+        self._show_fold()
 
     def set_brightness_shown(self, on: bool) -> None:
-        """Whether it has the brightness sliders (Settings)."""
+        """Whether it has the Brightness row and its sliders (Settings)."""
         self._brightness_on = on
-        self.screens.setVisible(on and bool(self.brightness_rows))
+        self._show_fold()
+
+    def _show_fold(self) -> None:
+        """The Brightness row, with monitors to set and the sliders on - and, if they are down, as
+        many of them as there are now."""
+        shown = self._brightness_on and bool(self.brightness_rows)
+        self.fold.setVisible(shown)
+        if not shown:
+            self._fold_to(False, animate=False)
+        elif self.screens_open:
+            self._drop(self._sliders.height())
         self.adjustSize()
+
+    def _fold_to(self, open_: bool, animate: bool = True) -> None:
+        """Drop the brightness sliders down under their row, or fold them away - the panel growing
+        to hold them, or shrinking back."""
+        self.screens_open = open_
+        if self._folding is not None:
+            self._folding.stop()
+            self._folding = None
+        full = self._sliders.height()
+        start = self.screens.height() if self.screens.isVisible() else 0
+        end = full if open_ else 0
+        if open_:
+            self.screens.show()
+        if not animate or not theme.motion_on() or not self.isVisible():
+            self._drop(end)
+            return
+        folding = self._folding = QVariantAnimation(self)
+        folding.setDuration(FOLD_MS)
+        folding.setEasingCurve(QEasingCurve.OutCubic)
+        folding.setStartValue(float(start))
+        folding.setEndValue(float(end))
+        folding.valueChanged.connect(lambda h: self._drop(round(h)))
+        folding.finished.connect(lambda: self._drop(end))
+        folding.start()
+
+    def _drop(self, height: int) -> None:
+        """As much of the sliders as that shows, the rest still folded up above it; the panel as
+        tall as it then is, its top where it was - unless that would take it off the screen."""
+        full = max(1, self._sliders.height())
+        self.screens.setFixedHeight(height)
+        self._sliders.move(0, height - full)
+        self.fold.set_opened(height / full)
+        if height == 0 and not self.screens_open:
+            self.screens.hide()
+        self.layout().invalidate()
+        self.layout().activate()
+        tall = self.sizeHint().height()
+        top = self.y()
+        screen = QGuiApplication.screenAt(self.frameGeometry().center()) if self.isVisible() else None
+        if screen is not None:
+            g = screen.geometry()
+            top = max(g.top() + MARGIN, min(top, g.bottom() + 1 - MARGIN - tall))
+        self.setGeometry(self.x(), top, self.width(), tall)
 
     def show_mic(self, muted: bool | None) -> None:
         """The microphone: muted or not - None with none plugged in."""
@@ -816,8 +940,9 @@ class EdgePanel(QWidget):
         self.adjustSize()
 
     def wheelEvent(self, event):
-        """The scroll wheel turns the pages - a notch a page, down to the next; a touchpad's
-        scrolling, once it adds up to a notch."""
+        """The scroll wheel turns the pages - a notch a page, down to the next, and round from the
+        last to the first (and up, from the first to the last); a touchpad's scrolling, once it
+        adds up to a notch."""
         delta = event.angleDelta().y() or event.angleDelta().x()
         now = time.monotonic()
         if now - self._wheel_at > 0.4:
@@ -825,7 +950,8 @@ class EdgePanel(QWidget):
         self._wheel_at = now
         self._wheel += delta
         if abs(self._wheel) >= 120:
-            self.pages.go(self.pages.position + (1 if self._wheel < 0 else -1))
+            step = 1 if self._wheel < 0 else -1
+            self.pages.go((self.pages.position + step) % len(self.pages.shown), way=step)
             self._wheel = 0
         event.accept()
 
@@ -1055,6 +1181,7 @@ class EdgePanel(QWidget):
         if not theme.motion_on() or screen is None:
             self.hide()
             self._leaving = False
+            self._fold_to(False, animate=False)         # folded again for next time
             self._show_tab()
             return
         _, away = self._places(screen.geometry())
@@ -1064,6 +1191,7 @@ class EdgePanel(QWidget):
         self.hide()
         self.setWindowOpacity(1.0)
         self._leaving = False
+        self._fold_to(False, animate=False)             # folded again for next time
         self._show_tab()
 
     def _slide(self, start: QPoint, end: QPoint, ms: int, curve, then=None) -> None:

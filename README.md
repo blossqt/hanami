@@ -80,16 +80,17 @@ background.
 ## The edge panel
 
 A thin tab at the screen's edge: rest the pointer on it, or click it, and a pane of glass slides
-out. Its pages turn with the scroll wheel, the dots along its bottom showing which is in sight:
+out. Its pages turn with the scroll wheel, round from the last to the first, the dots along its
+bottom showing which is in sight:
 
 - **Hanami suite**: the suite's apps, a dot under those running;
 - **Shortcuts**: programs, files, folders and websites, pinned in Settings > Edge panel;
 - **Stats**: the processor and memory, and, with an NVIDIA graphics card, its load, memory and
   temperature (read from NVIDIA's own `nvml.dll`), once a second while the page is in sight.
 
-Under every page, a brightness slider for each monitor that has DDC/CI on (set over the cable,
-as the monitor's own buttons would), then the sound output switch and a button muting the
-microphone. Settings > Edge panel chooses its edge, its pages, the sliders, its tab, and the
+Under every page, a Brightness row that drops down a slider for each monitor that has DDC/CI
+on (set over the cable, as the monitor's own buttons would), then the sound output switch and a
+button muting the microphone. Settings > Edge panel chooses its edge, its pages, the sliders, its tab, and the
 shortcuts. It keeps away from games and anything full screen.
 
 **The processor's temperature** comes from **Hanami Sensors** (`sensors\`): Windows gives no
