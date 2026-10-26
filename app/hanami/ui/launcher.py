@@ -213,6 +213,7 @@ class LauncherWindow(QWidget):
     cancel_install = Signal(str)
     uninstall_app = Signal(str)
     show_page = Signal(str)
+    update_hanami = Signal()
     exe_chosen = Signal(str, str)
     settings_clicked = Signal()
     output_clicked = Signal(str)        # 'speakers' or 'headphones' 
@@ -270,17 +271,23 @@ class LauncherWindow(QWidget):
 
         self.foot = _label('', 8, role='dim')
         self.foot.setTextFormat(Qt.RichText)
-        self.foot.linkActivated.connect(lambda _: self.show_page.emit('Hanami'))
+        self.foot.linkActivated.connect(lambda link: self.update_hanami.emit() if link == 'update'
+                                        else self.show_page.emit('Hanami'))
         layout.addWidget(self.foot)
         theme.restyle(self, self._style)
         self.show_hanami('')
 
-    def show_hanami(self, newer: str) -> None:
-        """The footer: Hanami's version, and a newer one if there is one."""
+    def show_hanami(self, newer: str, updating: str = '', can_update: bool = False) -> None:
+        """The footer: Hanami's version, and a newer one if there is one - to update to here (or,
+        run from source, to see on GitHub) - or the one being put in."""
         words = f'Hanami {__version__}  ·  Closing this window keeps Hanami in the tray.'
-        if newer:
-            words += (f'  ·  <a href="hanami" style="color:{theme.ink()}; text-decoration:none">'
-                      f'Hanami {newer} is out - get it</a>')
+        link = f'style="color:{theme.ink()}; text-decoration:none"'
+        if updating:
+            words += f'  ·  Updating to Hanami {updating}…'
+        elif newer and can_update:
+            words += f'  ·  <a href="update" {link}>Hanami {newer} is out - update</a>'
+        elif newer:
+            words += f'  ·  <a href="hanami" {link}>Hanami {newer} is out - get it</a>'
         self.foot.setText(words)
 
     def _style(self) -> str:

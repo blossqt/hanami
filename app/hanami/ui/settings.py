@@ -341,6 +341,7 @@ class _LookTile(QAbstractButton):
 class SettingsWindow(QWidget):
     startup_changed = Signal(bool, list)
     updates_changed = Signal(bool, bool, bool)      # look by itself, tell me, install by itself
+    hanami_updates_changed = Signal(bool)           # Hanami updates itself
     sound_changed = Signal(bool, str)               # the hotkey on, the hotkey
     output_chosen = Signal(str, str, str)           # 'speakers' or 'headphones', the output's id ('' for none), its name
     panel_changed = Signal(str)                     # the edge the panel slides out at: 'right', 'left' or '' (off)
@@ -737,7 +738,7 @@ class SettingsWindow(QWidget):
         self.sound_problem.setText(problem)
         self.sound_problem.setVisible(bool(problem))
 
-    def _updates(self, check: bool, notify: bool, auto: bool) -> QWidget:
+    def _updates(self, check: bool, notify: bool, auto: bool, hanami: bool = True) -> QWidget:
         page, layout = self._page('Updates', 'Hanami installs and updates the suite’s apps from their releases on '
                                              'GitHub, checking each one’s signature first.')
         frame, box = _section('Updates')
@@ -747,6 +748,10 @@ class SettingsWindow(QWidget):
         box.addWidget(holder)
         holder, self.auto = _switch('Install updates by itself', 'For the apps Hanami installed, while they aren’t '
                                     'running; one you’re using is updated once you quit it.', auto)
+        box.addWidget(holder)
+        holder, self.hanami_auto = _switch('Update Hanami by itself', 'It restarts for a moment to do it, while its '
+                                           'windows and panel are closed - never during a game.', hanami)
+        self.hanami_auto.toggled.connect(self.hanami_updates_changed)
         box.addWidget(holder)
         for switch in (self.check, self.notify, self.auto):
             switch.toggled.connect(self._updates_edited)

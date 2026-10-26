@@ -8,6 +8,10 @@ Hanami also installs and updates them, from their signed GitHub releases
 with the apps, what is pinned to it, the PC's stats, the sound button and the
 microphone's (ui/panel.py, ui/pins.py, stats.py), and holds the apps'
 notifications back while a full-screen game is in front (suitetheme's on_game).
+
+Hanami updates itself too, when a newer Hanami is out (installer.py: the new
+version is checked beside this one, then finishes the update itself -
+finish_update - once this one has quit, and starts in its place).
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import ctypes
 import json
 import os
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -47,6 +52,7 @@ QUIT_WAIT = 20                   # seconds an app gets to quit before an update
 STARTING_FOR = 20                # longest an app's card says "Starting…", for one that never comes up
 SOUND_HOTKEY = 'Ctrl+Alt+S'      # switches the sound output, until another is chosen
 HELD_MOST = 6                    # notifications kept back during a game, at most (the latest)
+HAND_OVER_EVERY = 30             # seconds between looks at whether Hanami may restart into its update
 
 
 class Settings:
@@ -118,6 +124,15 @@ class Settings:
     def auto_update(self) -> bool:
         """Install a newer release of an app Hanami installed, while it isn't running."""
         return self._flag('updates/auto', False)
+
+    @property
+    def update_hanami(self) -> bool:
+        """Put a newer Hanami in by itself: it restarts for a moment, while not in use."""
+        return self._flag('updates/hanami', True)
+
+    @update_hanami.setter
+    def update_hanami(self, on: bool) -> None:
+        self._store.setValue('updates/hanami', 'true' if on else 'false')
 
     def set_updates(self, check: bool, notify: bool, auto: bool) -> None:
         for key, value in (('check', check), ('notify', notify), ('auto', auto)):
@@ -256,10 +271,13 @@ class _Bridge(QObject):
     finished = Signal(str, object)            # name, files installed (list) or an error (str)
     sensors_done = Signal(str, str)           # Hanami Sensors' setup: what it was asked, what went wrong ('' if nothing)
     monitors_found = Signal(object)           # the monitors with a brightness: [brightness.Monitor]
+    hanami_staged = Signal(object, str)       # a newer Hanami, checked and waiting (its folder) - or what went wrong
 
 
 class Controller(QObject):
-    def __init__(self, startup: bool):
+    def __init__(self, startup: bool, updated: str = '', failed: str = ''):
+        """Started at sign-in (startup), or by an update that just put this version in (updated:
+        the version) or failed to and left this one (failed: the version that didn't go in)."""
         super().__init__()
         self.settings = Settings()
         self.host = TrayHost(self)
@@ -283,6 +301,13 @@ class Controller(QObject):
         self._bridge.finished.connect(self._job_finished)
         self._bridge.sensors_done.connect(self._sensors_done)
         self._bridge.monitors_found.connect(self._monitors_found)
+        self._bridge.hanami_staged.connect(self._hanami_staged)
+        self._self_update: str | None = None       # the version of Hanami being put in
+        self._self_update_asked = False
+        self._self_update_failed = failed           # not tried again by itself while this runs
+        self._staged_self: Path | None = None
+        self._hand_over_timer = QTimer(self, interval=HAND_OVER_EVERY * 1000)
+        self._hand_over_timer.timeout.connect(self._try_hand_over)
         self._held: list[tuple[str, str, QIcon]] = []     # notifications kept back while a game is in front
         self._make_tray()
         self._listen()
@@ -327,10 +352,18 @@ class Controller(QObject):
         self._ticker.timeout.connect(self._show_checked)
         self._ticker.start()
         self._refresh()
-        if startup or not DEV:
+        restarted = bool(updated or failed)                     # by an update: as it was, nothing more
+        if (startup or not DEV) and not restarted:
             QTimer.singleShot(2500, self._start_chosen)         # whenever Hanami starts, not only at sign-in
-        if not startup and not DEV:
+        if not startup and not DEV and not restarted:
             self.show_window()
+        if updated:
+            self._say('Hanami', f'Hanami is updated to {updated}.', icons.app_icon(), 4000)
+            win32.icon_changed(Path(sys.executable), win32.start_menu() / 'Hanami.lnk')
+        elif failed:
+            self._say('Hanami', f'Hanami couldn’t update to {failed}: some of its files were in use.',
+                      icons.app_icon(), 6000)
+        self._clear_leftovers(5)
         if not self.settings.set_up and getattr(sys, 'frozen', False):
             self.settings.set_up = True
             QTimer.singleShot(1000, self._add_to_start_menu)
@@ -746,13 +779,97 @@ class Controller(QObject):
 
     def _auto_update(self) -> None:
         """With updates installing by themselves: each app Hanami installed that has a newer
-        release and isn't running now. One that is waits until it quits."""
-        if not self.settings.auto_update or theme.quiet_now():
+        release and isn't running now. One that is waits until it quits. And Hanami itself."""
+        if theme.quiet_now():
             return                                          # (a game in front: once it is left)
+        newer = self.hanami_update()
+        if self.settings.update_hanami and newer is not None and newer.version != self._self_update_failed:
+            self.update_hanami(asked=False)
+        if not self.settings.auto_update:
+            return
         for app in catalog.SUITE:
             if self.update_available(app.name) and app.name not in self.jobs and not self.is_running(app.name) \
                     and not self._holding(app.name):
                 self.install_app(app.name)
+
+    # ------------------------------------------------------------------ Hanami itself
+
+    def hanami_update(self) -> releases.Release | None:
+        """A newer release of Hanami that this copy can put in - none run from source."""
+        mine = self.latest.get(catalog.HANAMI.name)
+        if DEV or installer.own_folder() is None or mine is None or mine.asset is None:
+            return None
+        return mine if releases.is_newer(mine.version, __version__) else None
+
+    def update_hanami(self, asked: bool = True) -> None:
+        """Put the newest Hanami in: downloaded, unpacked and checked beside this one while it runs
+        on; then handed over to (asked: at once; by itself, once Hanami isn't in use)."""
+        release = self.hanami_update()
+        if release is None or self._self_update is not None:
+            return
+        self._self_update, self._self_update_asked = release.version, asked
+        self._update_window()
+        home = installer.own_folder()
+
+        def work():
+            try:
+                self._bridge.hanami_staged.emit(installer.prepare_self(release, home), '')
+            except releases.ReleaseError as error:
+                self._bridge.hanami_staged.emit(None, str(error))
+            except Exception as error:  # noqa: BLE001 - said, never an error box
+                self._bridge.hanami_staged.emit(None, f'Hanami didn’t update: {error}')
+
+        threading.Thread(target=work, name='hanami-self-update', daemon=True).start()
+
+    def _hanami_staged(self, staged, problem: str) -> None:
+        if staged is None:
+            if self._self_update_asked:
+                self._say('Hanami', problem, icons.app_icon(), 6000)
+            self._self_update_failed = self._self_update or ''
+            self._self_update = None
+            self._update_window()
+            return
+        self._staged_self = Path(staged)
+        if self._self_update_asked:
+            self._hand_over()
+        else:
+            self._try_hand_over()
+            if self._staged_self is not None:
+                self._hand_over_timer.start()
+
+    def _in_use(self) -> bool:
+        """Whether a restart now would be in the way: a game or anything full screen in front, a
+        window of Hanami's or its panel open, or an app being installed."""
+        open_ = [w for w in (self.window, self.settings_window, self.panel) if w is not None and w.isVisible()]
+        return bool(theme.quiet_now() or win32.fullscreen_in_front() or open_ or self.jobs)
+
+    def _try_hand_over(self) -> None:
+        if self._staged_self is not None and not self._in_use():
+            self._hand_over()
+
+    def _hand_over(self) -> None:
+        """Start the new version from where it waits, to finish the update once this one has quit
+        (finish_update) - then quit."""
+        staged, self._staged_self = self._staged_self, None
+        self._hand_over_timer.stop()
+        try:
+            subprocess.Popen([str(staged / catalog.HANAMI.exe_name), '--finish-update', str(installer.own_folder()),
+                              str(os.getpid())], cwd=str(staged), env=installer.clean_environment(),
+                             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+        except OSError as error:
+            shutil.rmtree(staged, ignore_errors=True)
+            self._hanami_staged(None, f'Hanami didn’t update: {error}')
+            return
+        self.quit()
+
+    def _clear_leftovers(self, tries: int) -> None:
+        """What an update left beside Hanami's folder - once the program that finished it has
+        gone (it may take a moment)."""
+        home = installer.own_folder()
+        if home is None or DEV or self._self_update is not None:
+            return
+        if not installer.clear_leftovers(home) and tries > 1:
+            QTimer.singleShot(3000, lambda: self._clear_leftovers(tries - 1))
 
     def _show_checked(self) -> None:
         """The settings' line on updates: when Hanami last looked, and what it found."""
@@ -776,6 +893,10 @@ class Controller(QObject):
                      f'{out[0]} is out.' if len(out) == 1 else f'{", ".join(out[:-1])} and {out[-1]} are out.')
             text = f'Looked {when}. {found}'
         self.settings_window.show_checked(text, self._checking)
+
+    def _hanami_updates_changed(self, on: bool) -> None:
+        self.settings.update_hanami = on
+        self._auto_update()
 
     def _updates_changed(self, check: bool, notify: bool, auto: bool) -> None:
         self.settings.set_updates(check, notify, auto)
@@ -1023,6 +1144,7 @@ class Controller(QObject):
             self.window.cancel_install.connect(self.cancel_install)
             self.window.uninstall_app.connect(self.uninstall_app)
             self.window.show_page.connect(self.show_page)
+            self.window.update_hanami.connect(self.update_hanami)
             self.window.exe_chosen.connect(self._exe_chosen)
             self.window.output_clicked.connect(self.choose_output)
         self._update_window()
@@ -1037,7 +1159,8 @@ class Controller(QObject):
         if self.settings_window is None:
             s = self.settings
             self.settings_window = SettingsWindow(s.start_with, win32.starts_with_windows(),
-                                                  (s.check_updates, s.notify_updates, s.auto_update),
+                                                  (s.check_updates, s.notify_updates, s.auto_update,
+                                                   s.update_hanami),
                                                   (s.sound_hotkey_on, s.sound_hotkey), s.panel_edge, s.panel_tab,
                                                   s.pinned, s.panel_pages, s.panel_brightness)
             self.settings_window.startup_changed.connect(self._startup_changed)
@@ -1050,6 +1173,7 @@ class Controller(QObject):
             self.settings_window.sensors_asked.connect(self._sensors_asked)
             self.settings_window.brightness_changed.connect(self._brightness_changed)
             self.settings_window.updates_changed.connect(self._updates_changed)
+            self.settings_window.hanami_updates_changed.connect(self._hanami_updates_changed)
             self.settings_window.check_now.connect(self.check_releases)
             self.settings_window.show_page.connect(self.show_page)
             self.settings_window.open_url.connect(lambda url: QDesktopServices.openUrl(QUrl(url)))
@@ -1085,7 +1209,8 @@ class Controller(QObject):
         for app in catalog.SUITE:
             self.window.cards[app.name].show_state(self.card_state(app.name))
         mine = self.latest.get(catalog.HANAMI.name)
-        self.window.show_hanami(mine.version if mine and releases.is_newer(mine.version, __version__) else '')
+        self.window.show_hanami(mine.version if mine and releases.is_newer(mine.version, __version__) else '',
+                                self._self_update or '', self.hanami_update() is not None)
 
     def _exe_chosen(self, name: str, path: str) -> None:
         self.settings.set_exe(name, path)
@@ -1205,11 +1330,40 @@ def self_test(argv: list[str]) -> int:
     return 0 if not answer.startswith('FAILED') else 1
 
 
+def finish_update(argv: list[str]) -> int:
+    """Run by a new version of Hanami, from where it was unpacked and checked (or --from): once the
+    old one (its pid) has quit, take its place in its folder, and start there - told it was
+    updated, or, if it couldn't be, the old version told so. --no-restart starts nothing (tests)."""
+    at = argv.index('--finish-update')
+    home, pid = Path(argv[at + 1]), int(argv[at + 2])
+    staged = Path(argv[argv.index('--from') + 1]) if '--from' in argv else Path(sys.executable).parent
+    if not installer.wait_for(pid, QUIT_WAIT):
+        print(f'Hanami (pid {pid}) didn’t quit; nothing was changed.', file=sys.stderr)
+        return 2
+    try:
+        installer.swap_in(staged, home)
+        said = ['--updated', __version__]
+    except releases.ReleaseError:
+        traceback.print_exc()
+        said = ['--update-failed', __version__]
+    if '--no-restart' not in argv:
+        subprocess.Popen([str(home / catalog.HANAMI.exe_name), *said], cwd=str(home),
+                         env=installer.clean_environment(),
+                         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+    return 0 if said[0] == '--updated' else 1
+
+
+def _after(argv: list[str], flag: str) -> str:
+    return argv[argv.index(flag) + 1] if flag in argv and len(argv) > argv.index(flag) + 1 else ''
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv if argv is None else argv)
     suitelog.start(APP_NAME)
     if '--self-test' in argv:
         return self_test(argv)
+    if '--finish-update' in argv:
+        return finish_update(argv)
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
     except (AttributeError, OSError):
@@ -1233,7 +1387,8 @@ def main(argv: list[str] | None = None) -> int:
     if send('startup' if '--startup' in argv else 'show') is not None:
         return 0
 
-    controller = Controller(startup='--startup' in argv)
+    controller = Controller(startup='--startup' in argv, updated=_after(argv, '--updated'),
+                            failed=_after(argv, '--update-failed'))
     if not controller.host.listening:
         QMessageBox.warning(None, 'Hanami', 'Hanami could not open its tray link; the apps will keep '
                             'their own icons.')

@@ -41,6 +41,14 @@ and settings. Apps found elsewhere, like a build in `Documents` or a copy you
 pointed Hanami to, are started and quit but never changed. Grabbit and Homework
 Hub keep updating themselves too.
 
+Hanami updates itself, in the folder it runs from (Settings > Updates > **Update
+Hanami by itself**, on unless turned off; or **update** at the foot of its
+window). The new version is downloaded and checked as above, unpacked beside its
+folder as `Hanami.new`. Once Hanami's windows and panel are closed, and never
+during a game, Hanami starts the new version from there and quits. The new
+version waits for it to go, copies itself into the folder, and starts there. If
+a file is in use, the old version is put back and starts again instead.
+
 ## The tray
 
 While Hanami runs, the suite's apps don't put icons of their own in the tray.

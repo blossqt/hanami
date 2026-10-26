@@ -346,6 +346,106 @@ class SoundTests(_Controlled):
         self.controller.settings_window.close()
 
 
+class SelfUpdateTests(_Controlled):
+    """Hanami updating itself. Nothing is downloaded, started or quit: the new version is a folder
+    of the test's own, and starting it and quitting are written down."""
+
+    def setUp(self):
+        super().setUp()
+        from unittest import mock
+        from hanami import releases
+        self.home = WORK / 'self' / 'Hanami'
+        self.staged = WORK / 'self' / 'Hanami.new'
+        self.staged.mkdir(parents=True, exist_ok=True)
+        self.state = {'quiet': False}
+        self.started, self.quit, self.prepared = [], [], []
+        self._patches = [
+            mock.patch.object(hanami, 'DEV', False),
+            mock.patch.object(hanami.installer, 'own_folder', lambda: self.home),
+            mock.patch.object(hanami.installer, 'prepare_self',
+                              lambda release, home: self.prepared.append(release.version) or self.staged),
+            mock.patch.object(hanami.subprocess, 'Popen', lambda args, **kw: self.started.append(args)),
+            mock.patch.object(hanami.theme, 'quiet_now', lambda: self.state['quiet']),
+            mock.patch.object(hanami.win32, 'fullscreen_in_front', lambda: False)]
+        for patch in self._patches:
+            patch.start()
+        self.controller.quit = lambda: self.quit.append(1)
+        asset = releases.Asset('Hanami-9.9.9-win64.zip', 1, '0' * 64, 'https://example.invalid/x.zip')
+        self.controller.latest['Hanami'] = releases.Release('Hanami', '9.9.9', '', '', asset)
+
+    def tearDown(self):
+        for patch in self._patches:
+            patch.stop()
+        self.controller.settings._store.remove('updates/hanami')
+        super().tearDown()
+
+    def settle(self, until, seconds=5.0):
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline and not until():
+            qt.processEvents()
+            time.sleep(0.02)
+
+    def test_put_in_by_itself_while_not_in_use(self):
+        self.controller._auto_update()
+        self.settle(lambda: self.started)
+        self.assertEqual(self.prepared, ['9.9.9'])
+        args = self.started[0]
+        self.assertEqual(args[:3], [str(self.staged / 'Hanami.exe'), '--finish-update', str(self.home)])
+        self.assertEqual(args[3], str(os.getpid()), 'the new version waits for this one')
+        self.assertEqual(self.quit, [1], 'and this one quits for it')
+
+    def test_it_waits_while_in_use_and_never_during_a_game(self):
+        self.state['quiet'] = True
+        self.controller._auto_update()
+        self.settle(lambda: self.prepared, 0.5)
+        self.assertEqual(self.prepared, [], 'a game in front: not even downloaded')
+        self.state['quiet'] = False
+        self.controller.panel.show()
+        self.controller._auto_update()
+        self.settle(lambda: self.prepared and not self.controller._self_update is None and
+                    self.controller._staged_self is not None)
+        self.assertEqual(self.started, [], 'the panel out: it waits')
+        self.assertTrue(self.controller._hand_over_timer.isActive())
+        self.controller._auto_update()
+        self.assertEqual(self.prepared, ['9.9.9'], 'and isn\'t fetched twice')
+        self.controller.panel.hide()
+        self.controller._try_hand_over()
+        self.assertEqual(len(self.started), 1, 'once it is closed, it goes in')
+        self.assertFalse(self.controller._hand_over_timer.isActive())
+
+    def test_turned_off_or_failed_it_waits_to_be_asked(self):
+        self.controller._hanami_updates_changed(False)
+        self.assertFalse(self.controller.settings.update_hanami, 'kept')
+        self.controller._auto_update()
+        self.settle(lambda: self.prepared, 0.5)
+        self.assertEqual(self.prepared, [])
+        self.controller._self_update_failed = '9.9.9'
+        self.controller._hanami_updates_changed(True)
+        self.controller._auto_update()
+        self.settle(lambda: self.prepared, 0.5)
+        self.assertEqual(self.prepared, [], 'a version that failed isn\'t tried again by itself')
+        self.controller.update_hanami()                         # the window's "update" link
+        self.settle(lambda: self.started)
+        self.assertEqual(len(self.started), 1, 'asked: at once')
+
+    def test_not_run_from_source(self):
+        from unittest import mock
+        with mock.patch.object(hanami.installer, 'own_folder', lambda: None):
+            self.assertIsNone(self.controller.hanami_update())
+        self.controller.latest['Hanami'] = hanami.releases.Release('Hanami', hanami.__version__, '', '', None)
+        self.assertIsNone(self.controller.hanami_update(), 'nothing newer')
+
+    def test_the_settings_switch(self):
+        window = SettingsWindow([], False, (True, True, False, True), (True, hanami.SOUND_HOTKEY), 'right')
+        window.hanami_updates_changed.connect(self.controller._hanami_updates_changed)
+        try:
+            self.assertTrue(window.hanami_auto.isChecked())
+            window.hanami_auto.setChecked(False)
+            self.assertFalse(self.controller.settings.update_hanami)
+        finally:
+            window.close()
+
+
 class PanelTests(_Controlled):
     """The edge panel. Where the pointer is, and what is in front, are stand-ins."""
 

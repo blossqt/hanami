@@ -19,6 +19,13 @@ Only what a release put in the folder is ever moved or deleted - Hanami
 records those names - so anything else kept there, like a portable Grabbit's
 data, stays where it is. The app must not be running: Windows won't let a
 running program's files be moved, and Hanami quits it first (app.py).
+
+Hanami updates itself the same way, in the folder it runs from (own_folder),
+except for step 4: it can't move its own files while it runs. So the new
+version, unpacked and checked as <folder>.new, is started from there to finish
+(app.finish_update): it waits for the old one to quit, then swap_in copies it
+into the folder - copied, not moved, as it runs from those files - and starts
+it there. The next start clears <folder>.new away.
 """
 
 from __future__ import annotations
@@ -27,6 +34,7 @@ import ctypes
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
 from ctypes import wintypes
@@ -90,9 +98,9 @@ def _beside(app: SuiteApp, suffix: str) -> Path:
     return catalog.programs() / f'{app.name}{suffix}'
 
 
-def stage(app: SuiteApp, archive: Path, progress: Progress | None = None) -> Path:
-    """Unpack the release beside the install, as <App>.new."""
-    staged = _beside(app, '.new')
+def stage(app: SuiteApp, archive: Path, progress: Progress | None = None, staged: Path | None = None) -> Path:
+    """Unpack the release beside the install, as <App>.new (or into staged)."""
+    staged = staged or _beside(app, '.new')
     shutil.rmtree(staged, ignore_errors=True)
     staged.mkdir(parents=True)
     try:
@@ -194,15 +202,16 @@ def place(app: SuiteApp, staged: Path, previous: list[str]) -> list[str]:
     return new
 
 
-def prepare(app: SuiteApp, release: Release, progress: Progress | None = None, cancel=None) -> Path:
-    """Steps 1-3: download, unpack and check, beside the install - all while the
-    old version may still be running. Returns the staged folder."""
+def prepare(app: SuiteApp, release: Release, progress: Progress | None = None, cancel=None,
+            staged: Path | None = None) -> Path:
+    """Steps 1-3: download, unpack and check, beside the install (or into staged) - all
+    while the old version may still be running. Returns the staged folder."""
     if release.asset is None:
         raise ReleaseError(f'{app.name} {release.version} has no Windows download.')
-    catalog.programs().mkdir(parents=True, exist_ok=True)
+    (staged.parent if staged else catalog.programs()).mkdir(parents=True, exist_ok=True)
     archive = releases.download(release.asset, WORK, (lambda d, t: progress('download', d, t)) if progress else None,
                                 cancel)
-    staged = stage(app, archive, progress)
+    staged = stage(app, archive, progress, staged)
     try:
         if progress:
             progress('check', 0, 0)
@@ -269,3 +278,84 @@ def add_shortcut(app: SuiteApp) -> None:
     # An update replaces the exe at the same path, and Windows would go on
     # showing the old version's icon from its cache.
     win32.icon_changed(catalog.installed_exe(app), shortcut(app))
+
+
+# ------------------------------------------------------------------ Hanami itself
+
+def own_folder() -> Path | None:
+    """The folder this Hanami runs from - None run from source, with nothing to update."""
+    return Path(sys.executable).parent if getattr(sys, 'frozen', False) else None
+
+
+def beside(home: Path, suffix: str) -> Path:
+    return home.with_name(home.name + suffix)
+
+
+def prepare_self(release: Release, home: Path, progress: Progress | None = None, cancel=None,
+                 app: SuiteApp = catalog.HANAMI) -> Path:
+    """Steps 1-3 for Hanami itself: its newest release downloaded, unpacked beside its folder as
+    <folder>.new, and checked - while this one runs on. Returns that folder."""
+    return prepare(app, release, progress, cancel, staged=beside(home, '.new'))
+
+
+def _remove(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def swap_in(staged: Path, home: Path) -> None:
+    """Step 4 for Hanami itself, run by the new version from staged once the old one has quit:
+    what the old version has of the new one's names goes to <folder>.old, the new one is copied
+    in, and the old deleted. Anything else in the folder stays. A failure part-way puts the old
+    version back, whole."""
+    old = beside(home, '.old')
+    shutil.rmtree(old, ignore_errors=True)
+    old.mkdir()
+    new = sorted(p.name for p in staged.iterdir())
+    moved_out, copied_in, copying = [], [], None
+    try:
+        for name in new:
+            if (home / name).exists():
+                (home / name).rename(old / name)
+                moved_out.append(name)
+        for name in new:
+            copying = name
+            if (staged / name).is_dir():
+                shutil.copytree(staged / name, home / name)
+            else:
+                shutil.copy2(staged / name, home / name)
+            copied_in.append(name)
+            copying = None
+    except OSError:
+        for name in copied_in + ([copying] if copying else []):
+            _remove(home / name)
+        for name in moved_out:
+            try:
+                (old / name).rename(home / name)
+            except OSError:
+                pass
+        shutil.rmtree(old, ignore_errors=True)
+        raise ReleaseError('Some of Hanami’s files are in use, so it wasn’t updated.') from None
+    shutil.rmtree(old, ignore_errors=True)
+
+
+def wait_for(pid: int, seconds: float) -> bool:
+    """Wait for a program to quit - True once it has (or if it already had)."""
+    kernel = ctypes.windll.kernel32
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    handle = kernel.OpenProcess(0x00100000, False, pid)        # SYNCHRONIZE
+    if not handle:
+        return True
+    try:
+        return kernel.WaitForSingleObject(wintypes.HANDLE(handle), int(seconds * 1000)) == 0
+    finally:
+        kernel.CloseHandle(wintypes.HANDLE(handle))
+
+
+def clear_leftovers(home: Path) -> bool:
+    """<folder>.new and .old, left by an update - True once neither is there."""
+    for suffix in ('.new', '.old'):
+        shutil.rmtree(beside(home, suffix), ignore_errors=True)
+    return not beside(home, '.new').exists() and not beside(home, '.old').exists()

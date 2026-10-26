@@ -208,6 +208,107 @@ class InstallTest(unittest.TestCase):
         self.assertFalse((WORK / 'Programs' / 'Blossom.new').exists())
 
 
+def folder(where: Path, files: dict) -> Path:
+    """A folder of files (name: bytes), with _internal\ as a folder of its own."""
+    shutil.rmtree(where, ignore_errors=True)
+    for name, data in files.items():
+        (where / name).parent.mkdir(parents=True, exist_ok=True)
+        (where / name).write_bytes(data)
+    return where
+
+
+def sleeper(seconds: float) -> subprocess.Popen:
+    """A program that quits after a while - the old Hanami, for finish_update to wait for."""
+    return subprocess.Popen([sys.executable, '-c', f'import time; time.sleep({seconds})'])
+
+
+class SelfUpdateTest(unittest.TestCase):
+    """Hanami putting a newer version of itself in: the swap the new version makes once the old has
+    quit (installer.swap_in, app.finish_update)."""
+
+    def setUp(self):
+        self.home = folder(WORK / 'self' / 'Hanami', {'Hanami.exe': b'MZ old', '_internal/old.dll': b'old',
+                                                       'notes.txt': b'mine'})
+        self.staged = folder(WORK / 'self' / 'Hanami.new', {'Hanami.exe': b'MZ new', '_internal/new.dll': b'new'})
+
+    def tearDown(self):
+        shutil.rmtree(WORK / 'self', ignore_errors=True)
+
+    def test_swapped_in_keeping_what_is_not_its_own(self):
+        installer.swap_in(self.staged, self.home)
+        self.assertEqual((self.home / 'Hanami.exe').read_bytes(), b'MZ new')
+        self.assertEqual(sorted(p.name for p in (self.home / '_internal').iterdir()), ['new.dll'], 'the old one gone')
+        self.assertEqual((self.home / 'notes.txt').read_bytes(), b'mine', 'what isn\'t Hanami\'s stays')
+        self.assertFalse(installer.beside(self.home, '.old').exists())
+        self.assertTrue(installer.clear_leftovers(self.home), 'and the next start clears .new away')
+        self.assertFalse(self.staged.exists())
+
+    def test_a_file_in_use_leaves_the_old_version_whole(self):
+        handle = os.open(self.home / '_internal' / 'old.dll', os.O_RDONLY)     # as a running program holds it
+        try:
+            with self.assertRaisesRegex(releases.ReleaseError, 'in use'):
+                installer.swap_in(self.staged, self.home)
+        finally:
+            os.close(handle)
+        self.assertEqual((self.home / 'Hanami.exe').read_bytes(), b'MZ old')
+        self.assertEqual((self.home / '_internal' / 'old.dll').read_bytes(), b'old')
+        self.assertFalse(installer.beside(self.home, '.old').exists())
+
+    def finish(self, *extra):
+        return subprocess.run([sys.executable, str(ROOT / 'app' / 'main.py'), '--finish-update', str(self.home),
+                               *extra, '--no-restart'], env=dict(os.environ, QT_QPA_PLATFORM='offscreen'),
+                              capture_output=True, text=True, timeout=60)
+
+    def test_finished_once_the_old_one_has_quit(self):
+        old = sleeper(1.5)
+        started = time.monotonic()
+        done = self.finish(str(old.pid), '--from', str(self.staged))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIsNotNone(old.poll(), 'not before the old one quit')
+        self.assertGreater(time.monotonic() - started, 1.0)
+        self.assertEqual((self.home / 'Hanami.exe').read_bytes(), b'MZ new')
+
+    def test_one_that_never_quits_is_left_alone(self):
+        from hanami import app as hanami
+        old = sleeper(60)
+        try:
+            quit_wait, hanami.QUIT_WAIT = hanami.QUIT_WAIT, 0.5
+            try:
+                self.assertFalse(installer.wait_for(old.pid, 0.5))
+            finally:
+                hanami.QUIT_WAIT = quit_wait
+        finally:
+            old.kill()
+        self.assertTrue(installer.wait_for(old.pid, 5), 'gone: no wait')
+
+    @unittest.skipUnless((BUILT / 'Hanami.exe').exists(), 'needs a build of Hanami in dist\\')
+    def test_the_build_updates_itself(self):
+        """The real thing, short of starting Hanami: the build released as Hanami (under the test
+        key), unpacked and checked beside an old copy's folder, then run from there to finish."""
+        from hanami import __version__
+        version = installer.exe_version(BUILT / 'Hanami.exe')
+        if version != __version__:
+            self.skipTest(f'the build is {version}, not {__version__}: build it first')
+        mine = SuiteApp('Hanami', '', 'Hanami.exe', WORK / 'x', 'test/self', 'unused')
+        publish('test/self', 'Hanami', version, f'Hanami-{version}-win64.zip', zipped(BUILT, 'Hanami'))
+        staged = installer.prepare_self(releases.latest(mine), self.home, app=mine)
+        self.assertEqual(staged, installer.beside(self.home, '.new'), 'beside its folder')
+        old = sleeper(1)
+        # Under names of the test's own, offscreen: a build that didn't know --finish-update would
+        # start as Hanami, and must never reach the real one (it would bring its window up).
+        alone = dict(installer.clean_environment(), HANAMI_INSTANCE='hanami-self-update-test',
+                     HANAMI_PIPE='hanami-tray-self-update-test', HANAMI_SETTINGS=str(WORK / 'self.ini'),
+                     QT_QPA_PLATFORM='offscreen')
+        done = subprocess.run([str(staged / 'Hanami.exe'), '--finish-update', str(self.home), str(old.pid),
+                               '--no-restart'], cwd=str(staged), env=alone, timeout=60)
+        self.assertEqual(done.returncode, 0)
+        self.assertEqual(installer.exe_version(self.home / 'Hanami.exe'), version)
+        self.assertTrue((self.home / '_internal').is_dir())
+        self.assertFalse((self.home / '_internal' / 'old.dll').exists())
+        self.assertEqual((self.home / 'notes.txt').read_bytes(), b'mine')
+        self.assertTrue(installer.clear_leftovers(self.home))
+
+
 class ControllerTest(unittest.TestCase):
     """Hanami itself, from source and offscreen, installing Homework Hub from the stand-in site."""
 
