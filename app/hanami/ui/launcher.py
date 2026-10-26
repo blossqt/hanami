@@ -132,6 +132,7 @@ class AppCard(QFrame):
         layout.addLayout(text, 1)
         self._exe = None
         self._state = CardState()
+        self._shown = None              # the state last shown, and the colours it was shown in
 
     def _primary(self) -> None:
         if self._state.exe is None:
@@ -158,6 +159,13 @@ class AppCard(QFrame):
         self.icon.setPixmap(pixmap)
 
     def show_state(self, s: CardState) -> None:
+        """The card as the app is now - unchanged, nothing is done (it is asked every 2 s, and
+        through an install)."""
+        shown = (s, theme.colors().dim.name(), theme.ink())
+        if shown == self._shown:
+            return
+        rebuild_menu = self._shown is None or self._shown[0].installed != s.installed
+        self._shown = shown
         self._state = s
         self._show_icon(s.exe)
         self.version.setText(s.version)
@@ -198,6 +206,8 @@ class AppCard(QFrame):
         self.cancel.setVisible(busy and s.busy in ('download', 'unpack', 'quit'))
         self.more.setVisible(not busy)
 
+        if not rebuild_menu:
+            return
         self.menu.clear()
         self.menu.addAction('Release notes', lambda: self.page_clicked.emit(self.app.name))
         self.menu.addAction('Find it on this PC…', lambda: self.locate_clicked.emit(self.app.name))

@@ -52,6 +52,7 @@ QUIT_WAIT = 20                   # seconds an app gets to quit before an update
 STARTING_FOR = 20                # longest an app's card says "Starting…", for one that never comes up
 SOUND_HOTKEY = 'Ctrl+Alt+S'      # switches the sound output, until another is chosen
 HELD_MOST = 6                    # notifications kept back during a game, at most (the latest)
+PROGRESS_EVERY = 0.1             # seconds between an install's progress shown on its card
 HAND_OVER_EVERY = 30             # seconds between looks at whether Hanami may restart into its update
 
 
@@ -981,14 +982,16 @@ class Controller(QObject):
         job.previous = previous
         job.phase = 'download'
         self._update_window()
-        last = [None]
+        last = [None, 0.0]
 
         def progress(phase, done, total):
-            # Each 64 KB chunk would be a repaint; a tenth of a percent is plenty.
-            step = (phase, int(1000 * done / total) if total else 0)
-            if step != last[0]:
-                last[0] = step
-                self._bridge.progress.emit(job.name, phase, done, total)
+            # Each 64 KB chunk, or each file unpacked, would be a repaint: the window's thread did
+            # little else (0.1.31). A tenth of a second apart is plenty - and each new step at once.
+            now = time.monotonic()
+            if phase == last[0] and now - last[1] < PROGRESS_EVERY and done < total:
+                return
+            last[0], last[1] = phase, now
+            self._bridge.progress.emit(job.name, phase, done, total)
 
         def work():
             try:
@@ -1050,7 +1053,8 @@ class Controller(QObject):
         job = self.jobs.get(name)
         if job is not None:
             job.phase, job.done, job.total = phase, done, total
-            self._update_window()
+            if self.window is not None:                     # its card alone
+                self.window.cards[name].show_state(self.card_state(name))
 
     def _job_finished(self, name: str, result) -> None:
         job = self.jobs.pop(name, None)

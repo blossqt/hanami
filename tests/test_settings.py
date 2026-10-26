@@ -346,6 +346,54 @@ class SoundTests(_Controlled):
         self.controller.settings_window.close()
 
 
+class InstallProgressTests(_Controlled):
+    """An install's progress, as its window shows it. The download and the unpacking are stand-ins
+    that report as often as real ones do - every 64 KB chunk, every file - and nothing is fetched or
+    put anywhere."""
+
+    def test_shown_sparingly_and_only_on_its_own_card(self):
+        # 0.1.31 redrew every card for each tenth of a percent: the window's thread did little else
+        # while an app downloaded (1,950 redraws for one install, 4.7 s of 7.4).
+        from unittest import mock
+        from hanami import releases
+        from hanami.ui.launcher import LauncherWindow
+        staged = WORK / 'progress' / 'Grabbit.new'
+        staged.mkdir(parents=True, exist_ok=True)
+
+        def prepare(app, release, progress, cancel):
+            for done in range(1, 2001):
+                progress('download', done * 65536, 2000 * 65536)
+            for done in range(1, 1001):
+                progress('unpack', done, 1000)
+            progress('check', 0, 0)
+            return staged
+        asset = releases.Asset('Grabbit-9.0.0-win64.zip', 2000 * 65536, '0' * 64, 'https://example.invalid/g.zip')
+        self.controller.latest['Grabbit'] = releases.Release('Grabbit', '9.0.0', '', '', asset)
+        self.controller.window = LauncherWindow()
+        shown = {name: 0 for name in self.controller.window.cards}
+        for name, card in self.controller.window.cards.items():
+            card.show_state = (lambda real, n: lambda state: (shown.__setitem__(n, shown[n] + 1), real(state)))(
+                card.show_state, name)
+        signals = []
+        self.controller._bridge.progress.connect(lambda *a: signals.append(a[1]))
+        with mock.patch.object(hanami.installer, 'prepare', prepare), \
+                mock.patch.object(hanami.installer, 'finish', lambda app, staged, previous: ['Grabbit.exe']), \
+                mock.patch.object(self.suitetheme, 'game_in_front', lambda: False):
+            self.suitetheme._check_game()
+            self.controller.install_app('Grabbit')
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and 'Grabbit' in self.controller.jobs:
+                qt.processEvents()
+                time.sleep(0.01)
+        self.assertNotIn('Grabbit', self.controller.jobs, 'installed')
+        self.assertLessEqual(len(signals), 8, f'a few steps, not one each chunk: {len(signals)} signals')
+        self.assertEqual(sorted(set(signals)), ['check', 'download', 'unpack'], 'each step shown')
+        others = {name: count for name, count in shown.items() if name != 'Grabbit'}
+        self.assertLessEqual(max(others.values()), 3, f'the other cards left alone: {others}')
+        self.controller.window.close()
+        self.controller.settings.set_installed('Grabbit', None)
+
+
 class SelfUpdateTests(_Controlled):
     """Hanami updating itself. Nothing is downloaded, started or quit: the new version is a folder
     of the test's own, and starting it and quitting are written down."""
