@@ -6,6 +6,7 @@ import ctypes
 import os
 import subprocess
 import sys
+import threading
 import winreg
 from ctypes import wintypes
 from pathlib import Path
@@ -20,8 +21,10 @@ kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD,
                                                  ctypes.POINTER(wintypes.DWORD)]
 kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
 kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+kernel32.WaitForSingleObject.restype = wintypes.DWORD
 
-PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+PROCESS_QUERY_LIMITED_INFORMATION, SYNCHRONIZE, WAIT_TIMEOUT = 0x1000, 0x00100000, 0x102
 CREATE_NO_WINDOW = 0x08000000
 
 user32 = ctypes.WinDLL('user32', use_last_error=True)
@@ -65,23 +68,49 @@ def icon_changed(*paths: Path) -> None:
         shell32.SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW | SHCNF_FLUSH, ctypes.c_wchar_p(str(path)), None)
 
 
+class _Programs:
+    """Which programs run as this user, by their full paths - each process looked at once. Its
+    handle is kept while it runs, and that keeps Windows from giving its number to another process
+    meanwhile: a number seen before is the same program still. Reading every process's path anew
+    took 8-25 ms, every 2 s."""
+
+    def __init__(self):
+        self._known: dict[int, tuple[int, str]] = {}       # pid: (handle, path)
+        self._lock = threading.Lock()
+
+    def running(self) -> set[str]:
+        pids = (wintypes.DWORD * 4096)()
+        size = wintypes.DWORD()
+        if not psapi.EnumProcesses(pids, ctypes.sizeof(pids), ctypes.byref(size)):
+            return set()
+        now = pids[:size.value // ctypes.sizeof(wintypes.DWORD)]
+        with self._lock:
+            present = set(now)
+            for pid, (handle, _) in list(self._known.items()):
+                if pid not in present or kernel32.WaitForSingleObject(handle, 0) != WAIT_TIMEOUT:
+                    kernel32.CloseHandle(handle)            # it has gone: its number may be given again
+                    del self._known[pid]
+            buffer = ctypes.create_unicode_buffer(32768)
+            for pid in now:
+                if pid in self._known:
+                    continue
+                handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid)
+                if not handle:
+                    continue
+                length = wintypes.DWORD(len(buffer))
+                if kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(length)):
+                    self._known[pid] = (handle, os.path.normcase(buffer.value))
+                else:
+                    kernel32.CloseHandle(handle)
+            return {path for _, path in self._known.values()}
+
+
+_programs = _Programs()
+
+
 def running_programs() -> set[str]:
     """The full paths, lower case, of every program running as this user."""
-    pids = (wintypes.DWORD * 4096)()
-    size = wintypes.DWORD()
-    if not psapi.EnumProcesses(pids, ctypes.sizeof(pids), ctypes.byref(size)):
-        return set()
-    found = set()
-    buffer = ctypes.create_unicode_buffer(32768)
-    for pid in pids[:size.value // ctypes.sizeof(wintypes.DWORD)]:
-        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if not handle:
-            continue
-        length = wintypes.DWORD(len(buffer))
-        if kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(length)):
-            found.add(os.path.normcase(buffer.value))
-        kernel32.CloseHandle(handle)
-    return found
+    return _programs.running()
 
 
 # --------------------------------------------------------------------------- the window in front

@@ -389,7 +389,8 @@ class InstallProgressTests(_Controlled):
         self.assertLessEqual(len(signals), 8, f'a few steps, not one each chunk: {len(signals)} signals')
         self.assertEqual(sorted(set(signals)), ['check', 'download', 'unpack'], 'each step shown')
         others = {name: count for name, count in shown.items() if name != 'Grabbit'}
-        self.assertLessEqual(max(others.values()), 3, f'the other cards left alone: {others}')
+        # (three as the install goes, and once more as each app's version is read, off the windows' thread)
+        self.assertLessEqual(max(others.values()), 4, f'the other cards left alone: {others}')
         self.controller.window.close()
         self.controller.settings.set_installed('Grabbit', None)
 
@@ -925,6 +926,202 @@ class PanelTests(_Controlled):
         self.assertEqual((self.controller.settings.panel_edge, self.panel.edge), ('', None))
         self.assertFalse(window.edge_buttons['right'].isEnabled())
         window.close()
+
+
+
+class WindowThreadTests(_Controlled):
+    """Nothing slow on the windows' thread, nothing left behind as things move, and an open tray
+    menu left alone - each found by .dev/hunt/hunt_hanami.py in Keytap's folder (2026-10-26)."""
+
+    def _spin(self, seconds: float) -> None:
+        until = time.monotonic() + seconds
+        while time.monotonic() < until:
+            qt.processEvents()
+            time.sleep(0.01)
+
+    def test_an_open_tray_menu_is_left_alone(self):
+        # Grabbit's tooltip changes every second as it downloads: each change made the menu again,
+        # closing it under the pointer.
+        from PySide6.QtCore import QPoint
+        from PySide6.QtGui import QIcon
+        from hanami.host import Member
+        host, menu = self.controller.host, self.controller._menu
+        host.members['Grabbit'] = Member('Grabbit', 1, QIcon(), None, [{'id': 'quit', 'text': 'Quit'}], 'Grabbit')
+        host.changed.emit()
+        made = []
+        real_clear = menu.clear
+        menu.clear = lambda: (made.append(1), real_clear())
+        try:
+            menu.popup(QPoint(300, 300))
+            qt.processEvents()
+            self.assertTrue(menu.isVisible())
+            for speed in range(3):
+                host.members['Grabbit'].tooltip = f'Grabbit\n↓ {speed} MB/s'
+                host.changed.emit()
+            self.assertEqual(made, [], 'a tooltip changing leaves it be')
+            host.members['Grabbit'].items = [{'id': 'pause', 'text': 'Pause all'}, {'id': 'quit', 'text': 'Quit'}]
+            host.changed.emit()
+            self.assertEqual(made, [], 'its items changing too, while it is open')
+            menu.hide()
+            self._spin(0.1)
+            self.assertEqual(made, [1], 'made again once it has closed')
+            grabbit = next(a.menu() for a in menu.actions() if a.text() == 'Grabbit')
+            self.assertEqual([a.text() for a in grabbit.actions()], ['Pause all', 'Quit'])
+        finally:
+            menu.clear = real_clear
+            del host.members['Grabbit']
+
+    def test_the_hotkey_cleared_with_its_clear_button(self):
+        from PySide6.QtGui import QKeySequence
+        window = SettingsWindow([], False, (True, True, False), (True, 'Ctrl+Alt+S'))
+        said = []
+        window.sound_changed.connect(lambda on, hotkey: said.append((on, hotkey)))
+        window.sound_key.setKeySequence(QKeySequence('Ctrl+Alt+F12'))
+        window.sound_key.editingFinished.emit()
+        window.sound_key.clear()                    # what its clear button does
+        self.assertEqual(said, [(True, 'Ctrl+Alt+F12'), (True, '')])
+        window.close()
+
+    def test_animations_are_let_go_once_they_stop(self):
+        from PySide6.QtCore import QEvent, QObject
+        from hanami.stats import Stats
+        from hanami.ui import panel as panel_module
+        if not self.suitetheme.motion_on():
+            self.skipTest('animations are off on this PC')
+        panel = self.controller.panel
+        panel.show()
+
+        def count(widget) -> int:
+            qt.sendPostedEvents(None, QEvent.DeferredDelete)
+            return len(widget.findChildren(QObject))
+        stats = Stats(12.0, (8 * 2 ** 30, 32 * 2 ** 30), 50.0, (2 * 2 ** 30, 12 * 2 ** 30), 60)
+        row, button, pages = panel.stat_rows['cpu'], panel.hanami, panel.pages
+        before = count(row), count(button), count(pages), count(panel)
+        for _ in range(30):
+            panel.show_stats(stats)                 # each sample's bar glides
+            button.enterEvent(QEvent(QEvent.Enter))
+            button.leaveEvent(QEvent(QEvent.Leave))
+            pages.go((pages.position + 1) % len(pages.shown))
+            panel._fold_to(True)
+            panel._fold_to(False)
+        self._spin(0.6)                             # all of them done
+        after = count(row), count(button), count(pages), count(panel)
+        self.assertEqual(after, before, 'each animation deleted once it stopped')
+        panel.hide()
+
+    def test_an_update_given_up_frees_the_window_at_once(self):
+        # Grabbit's staged 3,000 files took 1.2 s to delete on the windows' thread, frozen meanwhile.
+        from unittest import mock
+        staged = WORK / 'given-up' / 'Grabbit.new'
+        staged.mkdir(parents=True, exist_ok=True)
+        deleted = []
+
+        def slow_rmtree(path, ignore_errors=False):
+            time.sleep(0.5)
+            deleted.append(Path(path))
+        job = hanami._Job('Grabbit', 'update')
+        job.staged = staged
+        self.controller.jobs['Grabbit'] = job
+        with mock.patch.object(hanami.shutil, 'rmtree', slow_rmtree):
+            started = time.monotonic()
+            self.controller._job_finished('Grabbit', 'Cancelled.')
+            self.assertLess(time.monotonic() - started, 0.2, 'not waited for')
+            self.assertFalse(staged.exists(), 'moved aside at once')
+            staged.mkdir()
+            (staged / 'Grabbit.exe').write_bytes(b'the next try')    # unpacked again meanwhile
+            self._spin(0.8)
+        self.assertEqual(len(deleted), 1)
+        self.assertTrue(deleted[0].name.startswith('Grabbit.new.gone-'), deleted)
+        self.assertTrue((staged / 'Grabbit.exe').exists(), 'the next try left be')
+        hanami.installer.sweep(staged.parent)
+        self.assertEqual([p.name for p in staged.parent.iterdir()], ['Grabbit.new'], 'and the rest swept away')
+
+    def test_a_silent_connection_doesnt_hold_hanami(self):
+        # One that connected and took its time froze the windows for up to half a second.
+        import threading
+        from PySide6.QtCore import QTimer
+        answers = []
+
+        def client():
+            with open(rf'\\.\pipe\{hanami.SERVER_NAME}', 'r+b', buffering=0) as pipe:
+                time.sleep(0.6)
+                pipe.write(b'state')
+                answers.append(pipe.read(1 << 16))
+        thread = threading.Thread(target=client)
+        thread.start()
+        ticks = []
+        timer = QTimer(interval=50)
+        timer.timeout.connect(lambda: ticks.append(time.monotonic()))
+        timer.start()
+        self._spin(0.5)
+        timer.stop()
+        thread.join(3)
+        self._spin(0.2)
+        self.assertGreaterEqual(len(ticks), 5, 'the windows went on meanwhile')
+        gaps = [b - a for a, b in zip(ticks, ticks[1:])]
+        self.assertLess(max(gaps), 0.15, f'never held up: {gaps}')
+        self.assertTrue(answers and answers[0].startswith(b'{'), f'and it was answered: {answers}')
+
+    def test_versions_are_read_off_the_windows_thread(self):
+        from unittest import mock
+        exe = Path(sys.executable)
+
+        def slow_version(path):
+            time.sleep(0.4)
+            return '7.7.7'
+        self.controller._versions.clear()
+        with mock.patch.object(hanami.installer, 'exe_version', slow_version), \
+                mock.patch.object(hanami.Settings, 'exe', lambda s, name: exe):
+            started = time.monotonic()
+            self.assertEqual(self.controller.version_of('Grabbit', exe), '', 'not known yet')
+            self.assertLess(time.monotonic() - started, 0.1, 'not waited for')
+            self._spin(0.7)
+            self.assertEqual(self.controller.version_of('Grabbit', exe), '7.7.7', 'known once read')
+
+    def test_where_the_sound_goes_is_asked_off_the_windows_thread(self):
+        from unittest import mock
+        from hanami.ui.launcher import LauncherWindow
+        controller = self.controller
+        controller.settings.set_output('speakers', 'sp', 'Speakers')
+        controller.settings.set_output('headphones', 'hp', 'Headphones')
+
+        def slow_current():
+            time.sleep(0.3)
+            return 'hp'
+        controller.window = LauncherWindow()
+        controller.window.show()
+        with mock.patch.object(hanami.audio, 'current', slow_current), \
+                mock.patch.object(hanami.audio, 'mic_muted', lambda: False):
+            started = time.monotonic()
+            controller._poll_tick()
+            self.assertLess(time.monotonic() - started, 0.1, 'not waited for')
+            self._spin(0.6)
+            self.assertEqual(controller.window.sound.side, 'headphones', 'shown once known')
+        controller.window.close()
+
+    def test_windows_are_made_ready_soon_after_start(self):
+        # Unseen, so the panel's first slide and the window's first opening don't stutter.
+        from hanami.ui import pins
+        controller = self.controller
+        controller.settings.pinned = [pins.for_address('example.com')]
+        controller._warm_up()
+        self.assertIsNotNone(controller.window)
+        self.assertTrue(controller.window.internalWinId() and controller.panel.internalWinId(), 'their own windows made')
+        self.assertFalse(controller.window.isVisible() or controller.panel.isVisible(), 'and not shown')
+        self.assertIn(('website', 'https://example.com'), controller._pin_icons, 'the pinned icons made')
+        controller.settings.pinned = []
+
+    def test_running_programs_are_seen_coming_and_going(self):
+        import subprocess
+        ping = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'PING.EXE'
+        named = os.path.normcase(str(ping))
+        process = subprocess.Popen([str(ping), '-n', '2', '127.0.0.1'], stdout=subprocess.DEVNULL,
+                                   creationflags=0x08000000)
+        time.sleep(0.2)
+        self.assertIn(named, hanami.win32.running_programs(), 'seen once started')
+        self.assertIn(named, hanami.win32.running_programs(), 'and still, looked at again')
+        process.wait(5)
+        self.assertNotIn(named, hanami.win32.running_programs(), 'gone once it has')
 
 
 if __name__ == '__main__':

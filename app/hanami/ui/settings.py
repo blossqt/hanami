@@ -112,8 +112,7 @@ class _Nav(QWidget):
         start = self._at
         self._current = index
         self.chosen.emit(index)
-        if self._slide is not None:
-            self._slide.stop()
+        theme.stop_animation(self._slide)
         if not theme.motion_on():
             self._at = float(index)
             self.update()
@@ -139,7 +138,7 @@ class _Nav(QWidget):
             self.update()
         slide.valueChanged.connect(step)
         slide.finished.connect(done)
-        slide.start()
+        theme.animate(slide)
 
     def _row_at(self, y: float) -> int:
         index = int((y - 8) // self.ROW)
@@ -708,6 +707,8 @@ class SettingsWindow(QWidget):
         self.sound_key.setClearButtonEnabled(True)
         self.sound_key.setFixedWidth(200)
         self.sound_key.editingFinished.connect(self._sound_edited)
+        # Its clear button empties it without editingFinished: the hotkey stayed until Hanami restarted.
+        self.sound_key.keySequenceChanged.connect(lambda keys: keys.isEmpty() and self._sound_edited())
         row.addWidget(self.sound_key)
         row.addStretch(1)
         box.addLayout(row)

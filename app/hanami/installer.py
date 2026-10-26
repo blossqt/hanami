@@ -36,6 +36,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import zipfile
 from ctypes import wintypes
 from pathlib import Path
@@ -352,6 +354,31 @@ def wait_for(pid: int, seconds: float) -> bool:
         return kernel.WaitForSingleObject(wintypes.HANDLE(handle), int(seconds * 1000)) == 0
     finally:
         kernel.CloseHandle(wintypes.HANDLE(handle))
+
+
+GONE = '.gone-'                  # a folder moved aside to be deleted: <name>.gone-<n>
+
+
+def throw_away(folder: Path) -> None:
+    """Delete a folder on a thread of its own - an app's thousands of files took over a second on
+    the windows' thread - moved aside first, at once, so a new version can be unpacked where it
+    was while the old is still going. One left half deleted, Hanami having quit meanwhile, is swept
+    away at its next start (sweep)."""
+    gone = folder.with_name(f'{folder.name}{GONE}{time.time_ns()}')
+    try:
+        folder.rename(gone)
+    except OSError:
+        if not folder.exists():
+            return
+        gone = folder                       # something in it is held open: deleted where it is
+    threading.Thread(target=shutil.rmtree, args=(gone,), kwargs={'ignore_errors': True},
+                     name='hanami-throw-away', daemon=True).start()
+
+
+def sweep(folder: Path) -> None:
+    """What throw_away left half deleted in a folder."""
+    for gone in folder.glob(f'*{GONE}*'):
+        shutil.rmtree(gone, ignore_errors=True)
 
 
 def clear_leftovers(home: Path) -> bool:

@@ -19,6 +19,7 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import queue
 import shutil
 import subprocess
 import sys
@@ -39,7 +40,7 @@ from .stats import Sampler
 from .ui import icons, pins, theme
 from .ui.launcher import CardState, LauncherWindow, placeholder_icon
 from .ui.panel import PAGES, TAB_LIMITS, TAB_LOOK, EdgePanel
-from .ui.settings import SettingsWindow
+from .ui.settings import SettingsWindow, glyph_font
 from .ui.sound import HEADPHONES, SPEAKER, SoundPopup, sounds_like_headphones
 
 SERVER_NAME = os.environ.get('HANAMI_INSTANCE') or f'hanami-{os.environ.get("USERNAME", "user")}'
@@ -54,6 +55,9 @@ SOUND_HOTKEY = 'Ctrl+Alt+S'      # switches the sound output, until another is c
 HELD_MOST = 6                    # notifications kept back during a game, at most (the latest)
 PROGRESS_EVERY = 0.1             # seconds between an install's progress shown on its card
 HAND_OVER_EVERY = 30             # seconds between looks at whether Hanami may restart into its update
+LEFTOVER_TRIES = 5, 3            # tries at clearing an update's leftovers away, seconds apart
+ASKED_TOO_LONG = 2000            # ms a connection to Hanami's socket gets to say what it wants
+WARM_AFTER = 3000                # ms after Hanami starts: what windows set up the first time they show (_warm_up)
 
 
 class Settings:
@@ -273,6 +277,48 @@ class _Bridge(QObject):
     sensors_done = Signal(str, str)           # Hanami Sensors' setup: what it was asked, what went wrong ('' if nothing)
     monitors_found = Signal(object)           # the monitors with a brightness: [brightness.Monitor]
     hanami_staged = Signal(object, str)       # a newer Hanami, checked and waiting (its folder) - or what went wrong
+    sound_polled = Signal(str, object)        # where the sound goes now (an output's id), the microphone muted (_AudioPoll)
+    version_read = Signal(str, object, str)   # the app, (its exe, when that was changed), the version stamped in it
+    sensors_known = Signal(object, str)       # Hanami Sensors as it is (sensors.State), what went wrong ('' if nothing)
+    leftovers_cleared = Signal()
+
+
+NOT_ASKED = 'not asked'
+
+
+class _AudioPoll:
+    """Where the sound goes, and whether the microphone is muted, asked of Windows on a thread of
+    Hanami's own (COM's, for as long as Hanami runs): each takes it a few ms, which on the windows'
+    thread was a stutter in whatever was moving on screen, every 2 s. One question waits at most."""
+
+    def __init__(self, answer):
+        self._answer = answer
+        self._asked: queue.Queue = queue.Queue(maxsize=1)
+        threading.Thread(target=self._run, name='hanami-audio', daemon=True).start()
+
+    def ask(self, mic: bool) -> None:
+        try:
+            self._asked.put_nowait(mic)
+        except queue.Full:
+            pass                            # one is waiting already
+
+    def _run(self) -> None:
+        while True:
+            mic = self._asked.get()
+            try:
+                try:
+                    now = audio.current()
+                except OSError:
+                    now = ''
+                muted = NOT_ASKED
+                if mic:
+                    try:
+                        muted = audio.mic_muted()
+                    except OSError:
+                        muted = None
+                self._answer(now, muted)
+            except Exception:  # noqa: BLE001 - this thread goes on, whatever one answer did
+                traceback.print_exc()
 
 
 class Controller(QObject):
@@ -303,6 +349,16 @@ class Controller(QObject):
         self._bridge.sensors_done.connect(self._sensors_done)
         self._bridge.monitors_found.connect(self._monitors_found)
         self._bridge.hanami_staged.connect(self._hanami_staged)
+        self._bridge.sound_polled.connect(self._sound_polled)
+        self._bridge.version_read.connect(self._version_read)
+        self._bridge.sensors_known.connect(self._sensors_known)
+        self._bridge.leftovers_cleared.connect(self._leftovers_cleared)
+        self._reading: set[tuple] = set()           # exes whose versions are being read
+        self._sensors_busy = ''                     # what Hanami Sensors' setup is doing, while it runs
+        self._clearing = False                      # an update's leftovers being cleared away
+        self._tray_shape = None                     # what the tray menu was last made of
+        self._tray_stale = False                    # it has changed while open: made again once it closes
+        self._audio = _AudioPoll(self._bridge.sound_polled.emit)
         self._self_update: str | None = None       # the version of Hanami being put in
         self._self_update_asked = False
         self._self_update_failed = failed           # not tried again by itself while this runs
@@ -342,7 +398,7 @@ class Controller(QObject):
         self.sound_problem = self._register_hotkeys()
         theme.on_game(self._game_changed)
         self._poll = QTimer(self, interval=2000)
-        self._poll.timeout.connect(self._refresh)
+        self._poll.timeout.connect(self._poll_tick)
         self._poll.start()
         self._checks = QTimer(self, interval=CHECK_EVERY * 1000)
         self._checks.timeout.connect(self.check_releases)
@@ -364,7 +420,9 @@ class Controller(QObject):
         elif failed:
             self._say('Hanami', f'Hanami couldn’t update to {failed}: some of its files were in use.',
                       icons.app_icon(), 6000)
-        self._clear_leftovers(5)
+        self._clear_leftovers()
+        threading.Thread(target=self._sweep, name='hanami-sweep', daemon=True).start()
+        QTimer.singleShot(WARM_AFTER, self._warm_up)
         if not self.settings.set_up and getattr(sys, 'frozen', False):
             self.settings.set_up = True
             QTimer.singleShot(1000, self._add_to_start_menu)
@@ -417,7 +475,14 @@ class Controller(QObject):
                 except Exception:                   # one that can't be started keeps none of the rest from it
                     traceback.print_exc()
 
-    def _refresh(self) -> None:
+    def _poll_tick(self) -> None:
+        """Every 2 s: what runs - and, while a sound switch or the panel is in sight, where the
+        sound goes and whether the microphone is muted, asked on a thread of their own."""
+        self._refresh(sound=False)
+        if self._sound_toggles() or self.panel.isVisible():
+            self._audio.ask(mic=self.panel.isVisible())
+
+    def _refresh(self, sound: bool = True) -> None:
         programs = win32.running_programs()
         running = set()
         for app in catalog.SUITE:
@@ -433,7 +498,8 @@ class Controller(QObject):
             self._auto_update()
         elif self.window is not None and self.window.isVisible():
             self._update_window()
-        self._update_sound()                    # the output may have changed elsewhere (Windows' own settings)
+        if sound:
+            self._update_sound()                # the output may have changed elsewhere (Windows' own settings)
 
     def _changed(self) -> None:
         self._update_tray()
@@ -552,19 +618,32 @@ class Controller(QObject):
         self.sound_popup.say(said)
         self._update_sound()
 
+    def _sound_toggles(self) -> list:
+        return [owner.sound for owner in (self.window, self.panel) if owner is not None and owner.isVisible()]
+
     def _update_sound(self) -> None:
         """The switches at the top of Hanami's window and in the edge panel: lit on the speakers or
         the headphones, as the sound goes to one of them now."""
-        toggles = [owner.sound for owner in (self.window, self.panel) if owner is not None and owner.isVisible()]
         if self.panel.isVisible():
             self._update_mic()
-        if not toggles:
+        if not self._sound_toggles():
             return
-        chosen = self.outputs_chosen()
         try:
             now = audio.current()
         except OSError:
             now = ''
+        self._show_sound(now)
+
+    def _sound_polled(self, now: str, muted) -> None:
+        self._show_sound(now)
+        if muted != NOT_ASKED and self.panel.isVisible():
+            self.panel.show_mic(muted)
+
+    def _show_sound(self, now: str) -> None:
+        toggles = self._sound_toggles()
+        if not toggles:
+            return
+        chosen = self.outputs_chosen()
         side = next((which for which, picked in chosen.items() if picked and picked[0] == now), None)
         names = {which: picked[1] if picked else 'not chosen' for which, picked in chosen.items()}
         for toggle in toggles:
@@ -608,7 +687,7 @@ class Controller(QObject):
             self.sampler.prepare()                  # NVIDIA's driver, loaded only for the stats page
             self.sampler.sensors.wake()             # Hanami Sensors started now, ready by the time it is in sight
         self._look_for_monitors()                   # each time: they may have been set by their own buttons
-        QTimer.singleShot(0, self._update_sound)
+        self._audio.ask(mic=True)                   # (not here: it would stall the panel as it slides out)
 
     def _look_for_monitors(self) -> None:
         """Read the monitors' brightness, on brightness' own thread - not while a game is in front,
@@ -644,16 +723,30 @@ class Controller(QObject):
     def _sensors_asked(self, action: str) -> None:
         """Install (or update) or remove Hanami Sensors: its setup, run as administrator - Windows
         asks first - on a thread of its own, as it is waited for."""
-        if self.settings_window is not None:
-            self.settings_window.show_sensors(sensors.state(), 'Removing…' if action == '--uninstall' else 'Installing…')
+        self._sensors_busy = 'Removing…' if action == '--uninstall' else 'Installing…'
+        self._look_at_sensors()
         threading.Thread(target=lambda: self._bridge.sensors_done.emit(action, sensors.run_setup(action)),
                          name='hanami-sensors-setup', daemon=True).start()
 
     def _sensors_done(self, action: str, problem: str) -> None:
-        if self.settings_window is not None:
-            self.settings_window.show_sensors(sensors.state(), problem=problem)
+        self._sensors_busy = ''
+        self._look_at_sensors(problem)
         if problem:
             self._say('Hanami Sensors', problem, icons.app_icon())
+
+    def _look_at_sensors(self, problem: str = '') -> None:
+        """Hanami Sensors as it is, for Settings - looked at on a thread (it reads two programs'
+        versions, which the first time waits on Windows' Defender), and shown once known."""
+        def look():
+            try:
+                self._bridge.sensors_known.emit(sensors.state(), problem)
+            except Exception:  # noqa: BLE001 - left as it was shown
+                traceback.print_exc()
+        threading.Thread(target=look, name='hanami-sensors-state', daemon=True).start()
+
+    def _sensors_known(self, state, problem: str) -> None:
+        if self.settings_window is not None:
+            self.settings_window.show_sensors(state, self._sensors_busy, problem)
 
     def _pages_changed(self, names: list) -> None:
         self.settings.panel_pages = names
@@ -663,8 +756,9 @@ class Controller(QObject):
         self.settings.pinned = pinned
         kept = {(pin.kind, pin.target) for pin in pinned}
         self._pin_icons = {key: icon for key, icon in self._pin_icons.items() if key in kept}
+        shown = [(pin.name, self._pin_icon(pin)) for pin in pinned]    # now, not as the panel next slides out
         if self.panel.isVisible():
-            self.panel.show_pins([(pin.name, self._pin_icon(pin)) for pin in pinned])
+            self.panel.show_pins(shown)
 
     def _panel_icon(self, name: str, exe: Path):
         """An app's own icon, from its exe, for the panel - kept until the exe changes."""
@@ -721,9 +815,27 @@ class Controller(QObject):
             key = (str(exe), exe.stat().st_mtime)
         except OSError:
             return ''
-        if key not in self._versions:
-            self._versions[key] = installer.exe_version(exe)
-        return self._versions[key]
+        if key in self._versions:
+            return self._versions[key]
+        if key not in self._reading:
+            # Read on a thread: the first look at a big exe waits for Windows' Defender to scan it
+            # (a third of a second, as Hanami's window first opened). Its card says it once known.
+            self._reading.add(key)
+
+            def read():
+                try:
+                    version = installer.exe_version(exe)
+                except Exception:  # noqa: BLE001 - no version, then
+                    version = ''
+                self._bridge.version_read.emit(name, key, version)
+            threading.Thread(target=read, name='hanami-version', daemon=True).start()
+        return ''
+
+    def _version_read(self, name: str, key: tuple, version: str) -> None:
+        self._reading.discard(key)
+        self._versions[key] = version
+        if self.window is not None:                             # its card alone
+            self.window.cards[name].show_state(self.card_state(name))
 
     def update_available(self, name: str) -> bool:
         """A newer release of an app Hanami installed (other copies update themselves, or by hand)."""
@@ -806,8 +918,8 @@ class Controller(QObject):
         """Put the newest Hanami in: downloaded, unpacked and checked beside this one while it runs
         on; then handed over to (asked: at once; by itself, once Hanami isn't in use)."""
         release = self.hanami_update()
-        if release is None or self._self_update is not None:
-            return
+        if release is None or self._self_update is not None or self._clearing:
+            return                                      # (clearing: once the last update's leftovers are gone)
         self._self_update, self._self_update_asked = release.version, asked
         self._update_window()
         home = installer.own_folder()
@@ -858,19 +970,42 @@ class Controller(QObject):
                               str(os.getpid())], cwd=str(staged), env=installer.clean_environment(),
                              creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
         except OSError as error:
-            shutil.rmtree(staged, ignore_errors=True)
+            installer.throw_away(staged)
             self._hanami_staged(None, f'Hanami didn’t update: {error}')
             return
         self.quit()
 
-    def _clear_leftovers(self, tries: int) -> None:
+    def _clear_leftovers(self) -> None:
         """What an update left beside Hanami's folder - once the program that finished it has
-        gone (it may take a moment)."""
+        gone (it may take a moment). On a thread: it is a whole Hanami. No update starts meanwhile."""
         home = installer.own_folder()
         if home is None or DEV or self._self_update is not None:
             return
-        if not installer.clear_leftovers(home) and tries > 1:
-            QTimer.singleShot(3000, lambda: self._clear_leftovers(tries - 1))
+        self._clearing = True
+        tries, apart = LEFTOVER_TRIES
+
+        def clear():
+            try:
+                for attempt in range(tries):
+                    if attempt:
+                        time.sleep(apart)
+                    if installer.clear_leftovers(home):
+                        break
+            finally:
+                self._bridge.leftovers_cleared.emit()
+        threading.Thread(target=clear, name='hanami-leftovers', daemon=True).start()
+
+    @staticmethod
+    def _sweep() -> None:
+        """Folders thrown away (installer.throw_away) but left half deleted, as Hanami quit meanwhile."""
+        home = installer.own_folder()
+        for folder in [catalog.programs()] + ([home.parent] if home is not None else []):
+            if folder.is_dir():
+                installer.sweep(folder)
+
+    def _leftovers_cleared(self) -> None:
+        self._clearing = False
+        self._auto_update()                             # one found meanwhile goes in now
 
     def _show_checked(self) -> None:
         """The settings' line on updates: when Hanami last looked, and what it found."""
@@ -1008,7 +1143,7 @@ class Controller(QObject):
     def _job_prepared(self, name: str, staged) -> None:
         job = self.jobs.get(name)
         if job is None or job.cancel.is_set():
-            shutil.rmtree(staged, ignore_errors=True)
+            installer.throw_away(staged)
             if job is not None:
                 self._job_finished(name, 'Cancelled.')
             return
@@ -1061,7 +1196,7 @@ class Controller(QObject):
         if job is None:
             return
         if isinstance(result, str) and job.staged is not None:
-            shutil.rmtree(job.staged, ignore_errors=True)     # a checked new version that never went in
+            installer.throw_away(job.staged)                # a checked new version that never went in
         if isinstance(result, str):
             self.problems[name] = '' if result == 'Cancelled.' else result
         elif job.kind == 'uninstall':
@@ -1085,20 +1220,34 @@ class Controller(QObject):
         self.tray = QSystemTrayIcon(icons.app_icon(), self)
         self._menu = QMenu()
         self._menu.aboutToShow.connect(self._update_tray)
+        self._menu.aboutToHide.connect(lambda: self._tray_stale and QTimer.singleShot(0, self._update_tray))
         self.tray.setContextMenu(self._menu)
         self.tray.activated.connect(self._tray_clicked)
         self._update_tray()
         self.tray.show()
 
     def _update_tray(self) -> None:
-        menu = self._menu
-        menu.clear()
+        """The tray menu - made again only when what it holds changes, and never while it is open:
+        an app's tooltip changing each second (Grabbit's speeds, as it downloads) closed it under
+        the pointer. A change while it is open waits until it closes."""
         members = sorted(self.host.members.values(), key=lambda m: catalog.ORDER.get(m.name, 99))
+        not_running = [app for app in catalog.SUITE
+                       if not self.is_running(app.name) and self.settings.exe(app.name) is not None]
+        names = ', '.join(m.name for m in members)
+        self.tray.setToolTip(f'Hanami - {names}' if names else 'Hanami')
+        shape = ([(m.name, m.icon.cacheKey(), json.dumps(m.items, sort_keys=True)) for m in members],
+                 [app.name for app in not_running])
+        if shape == self._tray_shape:
+            return
+        menu = self._menu
+        if menu.isVisible():
+            self._tray_stale = True
+            return
+        self._tray_shape, self._tray_stale = shape, False
+        menu.clear()
         for member in members:
             sub = menu.addMenu(member.icon, member.name)
             self._fill(sub, member)
-        not_running = [app for app in catalog.SUITE
-                       if not self.is_running(app.name) and self.settings.exe(app.name) is not None]
         if not_running:
             start = menu.addMenu('Start')
             for app in not_running:
@@ -1110,8 +1259,6 @@ class Controller(QObject):
         opener.setFont(font)
         menu.addAction('Settings', self.show_settings)
         menu.addAction('Quit Hanami', self.quit)
-        names = ', '.join(m.name for m in members)
-        self.tray.setToolTip(f'Hanami - {names}' if names else 'Hanami')
 
     def _fill(self, menu: QMenu, member) -> None:
         for item in member.items:
@@ -1138,7 +1285,21 @@ class Controller(QObject):
 
     # ------------------------------------------------------------------ window
 
-    def show_window(self) -> None:
+    def _warm_up(self) -> None:
+        """What Qt and Windows set up the first time a window shows, done now, soon after Hanami
+        starts and unseen: the list of fonts, the panel's and the window's own native windows, and
+        the icons pinned to the panel. The panel's first slide stuttered for 0.1-0.4 s, and the
+        window's first opening took 0.7 s. Not while a game is in front: once it has gone."""
+        if theme.quiet_now():
+            QTimer.singleShot(WARM_AFTER, self._warm_up)
+            return
+        glyph_font(12).exactMatch()
+        self.panel.winId()
+        for pin in self.settings.pinned:
+            self._pin_icon(pin)
+        self._make_window().winId()
+
+    def _make_window(self) -> LauncherWindow:
         if self.window is None:
             self.window = LauncherWindow()
             self.window.settings_clicked.connect(self.show_settings)
@@ -1151,11 +1312,16 @@ class Controller(QObject):
             self.window.update_hanami.connect(self.update_hanami)
             self.window.exe_chosen.connect(self._exe_chosen)
             self.window.output_clicked.connect(self.choose_output)
+            self._update_window()
+        return self.window
+
+    def show_window(self) -> None:
+        self._make_window()
         self._update_window()
         self.window.show()
         self.window.raise_()
         self.window.activateWindow()
-        self._update_sound()
+        self._audio.ask(mic=self.panel.isVisible())
         if self.settings.check_updates and self._checked_at and time.monotonic() - self._checked_at > CHECK_AGAIN:
             self.check_releases()
 
@@ -1183,7 +1349,7 @@ class Controller(QObject):
             self.settings_window.open_url.connect(lambda url: QDesktopServices.openUrl(QUrl(url)))
         if page:
             self.settings_window.open_page(page)
-        self.settings_window.show_sensors(sensors.state())
+        self._look_at_sensors()
         self.settings_window.show_monitors(None if self._monitors is None else [m.name for m in self._monitors])
         try:
             outputs = audio.outputs()
@@ -1258,8 +1424,20 @@ class Controller(QObject):
         self._server.listen(SERVER_NAME)
 
     def _connection(self) -> None:
-        socket = self._server.nextPendingConnection()
-        socket.waitForReadyRead(500)
+        """Someone at Hanami's socket - a second start of it, or quit_app.py: what it says is read
+        once it has arrived. Waited for here, a connection that took its time froze the windows."""
+        while self._server.hasPendingConnections():
+            socket = self._server.nextPendingConnection()
+            socket.readyRead.connect(lambda s=socket: self._asked(s))
+            socket.disconnected.connect(socket.deleteLater)
+            QTimer.singleShot(ASKED_TOO_LONG, socket, socket.abort)
+            if socket.bytesAvailable():
+                self._asked(socket)
+
+    def _asked(self, socket: QLocalSocket) -> None:
+        if socket.property('asked'):
+            return
+        socket.setProperty('asked', True)
         words = bytes(socket.readAll()).decode('utf-8', 'replace').split()
         reply = ''
         if not words or words[0] == 'show':
@@ -1293,8 +1471,7 @@ class Controller(QObject):
             self.cancel_install(' '.join(words[1:]))
         if reply:
             socket.write(reply.encode('utf-8'))
-            socket.waitForBytesWritten(500)
-        socket.disconnectFromServer()
+        socket.disconnectFromServer()               # once what was written has gone
 
 
 def send(message: str, reply: bool = False) -> str | None:

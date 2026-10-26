@@ -247,8 +247,7 @@ class _AppButton(QWidget):
             self._lift = value
             self.update()
             return
-        if self._moving is not None:
-            self._moving.stop()
+        theme.stop_animation(self._moving)
         lift = QVariantAnimation(self)
         lift.setDuration(160 if value else 260)
         lift.setStartValue(self._lift)
@@ -256,7 +255,7 @@ class _AppButton(QWidget):
         lift.setEasingCurve(QEasingCurve.OutCubic)
         lift.valueChanged.connect(lambda v: (setattr(self, '_lift', float(v)), self.update()))
         self._moving = lift
-        lift.start()
+        theme.animate(lift)
 
     def enterEvent(self, event):
         self._to(1.0)
@@ -342,8 +341,7 @@ class _Stat(QWidget):
             self.update()
             return
         share = max(0.0, min(1.0, share))
-        if self._glide is not None:
-            self._glide.stop()
+        theme.stop_animation(self._glide)
         if not theme.motion_on() or not self.isVisible():
             self.share = share
             self.update()
@@ -354,7 +352,7 @@ class _Stat(QWidget):
         glide.setStartValue(self.share)
         glide.setEndValue(share)
         glide.valueChanged.connect(lambda v: (setattr(self, 'share', float(v)), self.update()))
-        glide.start()
+        theme.animate(glide)
 
     def paintEvent(self, event):
         c = theme.colors()
@@ -573,9 +571,8 @@ class _Pages(QWidget):
         self._place()
 
     def _place(self) -> None:
-        if self._slide is not None:
-            self._slide.stop()
-            self._slide = None
+        slide, self._slide = self._slide, None
+        theme.stop_animation(slide)
         for index, page in enumerate(self.pages):
             page.setGeometry(0, 0, self.width(), self.height())
             page.setVisible(index == self.current)
@@ -594,8 +591,7 @@ class _Pages(QWidget):
         if not theme.motion_on() or not self.isVisible():
             self._place()
             return
-        if self._slide is not None:
-            self._slide.stop()
+        theme.stop_animation(self._slide)
         for page in self.pages:
             if page not in (old, new):
                 page.hide()
@@ -610,7 +606,7 @@ class _Pages(QWidget):
         slide.valueChanged.connect(lambda t: (old.move(round(-way * width * t), 0),
                                               new.move(round(way * width * (1 - t)), 0)))
         slide.finished.connect(self._place)
-        slide.start()
+        theme.animate(slide)
 
 
 class _Dots(QWidget):
@@ -862,9 +858,8 @@ class EdgePanel(QWidget):
         """Drop the brightness sliders down under their row, or fold them away - the panel growing
         to hold them, or shrinking back."""
         self.screens_open = open_
-        if self._folding is not None:
-            self._folding.stop()
-            self._folding = None
+        folding, self._folding = self._folding, None
+        theme.stop_animation(folding)
         full = self._sliders.height()
         start = self.screens.height() if self.screens.isVisible() else 0
         end = full if open_ else 0
@@ -880,7 +875,7 @@ class EdgePanel(QWidget):
         folding.setEndValue(float(end))
         folding.valueChanged.connect(lambda h: self._drop(round(h)))
         folding.finished.connect(lambda: self._drop(end))
-        folding.start()
+        theme.animate(folding)
 
     def _drop(self, height: int) -> None:
         """As much of the sliders as that shows, the rest still folded up above it; the panel as
@@ -1193,8 +1188,7 @@ class EdgePanel(QWidget):
         self._show_tab()
 
     def _slide(self, start: QPoint, end: QPoint, ms: int, curve, then=None) -> None:
-        if self._sliding is not None:
-            self._sliding.stop()
+        theme.stop_animation(self._sliding)
         slide = QPropertyAnimation(self, b'pos', self)
         slide.setDuration(ms)
         slide.setStartValue(start)
@@ -1208,7 +1202,7 @@ class EdgePanel(QWidget):
         else:
             slide.finished.connect(lambda: self.setWindowOpacity(1.0))
         self._sliding = slide
-        slide.start()
+        theme.animate(slide)
 
     # ------------------------------------------------------------------ drawing
 

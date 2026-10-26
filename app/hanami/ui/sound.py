@@ -54,8 +54,7 @@ class SoundToggle(QWidget):
         if side == self.side:
             return
         self.side = side
-        if self._moving is not None:
-            self._moving.stop()
+        theme.stop_animation(self._moving)
         target = None if side is None else float(SIDES.index(side))
         if target is None or self._at is None or not theme.motion_on() or not self.isVisible():
             self._at = target
@@ -74,7 +73,7 @@ class SoundToggle(QWidget):
             slide.setEasingCurve(QEasingCurve.OutCubic)
         slide.valueChanged.connect(lambda v: (setattr(self, '_at', float(v)), self.update()))
         self._moving = slide
-        slide.start()
+        theme.animate(slide)
 
     def _other(self) -> str:
         """What a click asks for: the one the sound isn't going to (the headphones, if neither)."""
@@ -235,8 +234,8 @@ class SoundPopup(QWidget):
         (else the one its name suggests)."""
         self.name = name
         self.glyph = glyph or glyph_for(name)
-        if self._fading is not None and self._fading.state() == self._fading.State.Running:
-            self._fading.stop()                             # pressed again as it went: it stays
+        if self._fading_now():
+            theme.stop_animation(self._fading)              # pressed again as it went: it stays
             self._suite_closing = False
             self.setWindowOpacity(1.0)
         width = QFontMetrics(theme.font(10.5, QFont.DemiBold)).horizontalAdvance(name) + 84
@@ -250,6 +249,12 @@ class SoundPopup(QWidget):
             self.show()
         self.raise_()
         self._timer.start()
+
+    def _fading_now(self) -> bool:
+        try:
+            return self._fading is not None and self._fading.state() == self._fading.State.Running
+        except RuntimeError:                                # done, and let go
+            return False
 
     def _leave(self) -> None:
         self._fading = theme.fade_out(self)
