@@ -70,6 +70,22 @@ class OcrTests(unittest.TestCase):
         self.assertIn('今天的作业在星期五之前交', lines, 'no spaces between the characters')
         self.assertIn('The quick brown fox jumps over the lazy dog', lines, 'English still read as English')
 
+    @unittest.skipUnless(len(suiteocr.readers()) > 1, 'no Chinese, Japanese or Korean reader set up')
+    def test_a_games_big_title(self):
+        # The Chinese reader read 64 px Impact capitals as "删肅胩", which used to win.
+        image = QImage(1200, 600, QImage.Format_ARGB32_Premultiplied)
+        image.fill(QColor('#14202a'))
+        painter = QPainter(image)
+        painter.setPen(QColor('#ece4e6'))
+        for family, size, y, text in (('Bahnschrift', 15, 60, 'FEATURED'), ('Impact', 64, 150, 'GRAVE MATTERS'),
+                                      ('Segoe UI', 15, 230, "Don't be too scared to pick up this bundle")):
+            font = QFont(family)
+            font.setPixelSize(size)
+            painter.setFont(font)
+            painter.drawText(60, y, text)
+        painter.end()
+        self.assertIn('GRAVE MATTERS', [line.text for line in suiteocr.recognize(image)])
+
     def test_places_are_the_pictures_own(self):
         lines = suiteocr.recognize(page())
         invoice = next(line for line in lines if line.text.startswith('Invoice'))
@@ -120,6 +136,24 @@ class JoiningTests(unittest.TestCase):
                    [Word('：', 62, 40, 8, 10)]]                # a colon, read as Chinese punctuation
         lines = suiteocr._together([english, chinese])
         self.assertEqual([line.text for line in lines], ['混合 text 和 123', 'def image:'])
+
+    def test_big_capitals_stay_english(self):
+        # A game's title as both readers gave it: the Chinese one took "RAV" for one character.
+        english = [[Word('GRAVE', 41, 64, 146, 57), Word('MATTERS', 202, 64, 210, 60)]]
+        chinese = [[Word('鼐', 102, 64, 61, 57), Word('E', 166, 64, 22, 57), Word('MATTER', 202, 64, 180, 58),
+                    Word('S', 385, 65, 26, 56)]]
+        self.assertEqual(suiteocr.text_of(suiteocr._together([english, chinese])), 'GRAVE MATTERS')
+
+    def test_what_english_missed(self):
+        # The English reader skipped a timer; the Chinese one read it in pieces, with wide colons.
+        english = [[Word('FEATURED', 40, 32, 68, 11)]]
+        chinese = [[Word('FEATURED', 40, 32, 68, 11), Word('27', 127, 32, 14, 11), Word('：', 143, 34, 2, 8),
+                    Word('18', 148, 32, 14, 11), Word('：', 163, 35, 2, 7), Word('51', 167, 32, 12, 11),
+                    Word('：', 183, 34, 2, 8), Word('47', 186, 32, 15, 10)],
+                   [Word('完', 40, 80, 18, 18), Word('成', 60, 80, 18, 18), Word('：', 82, 86, 2, 8),
+                    Word('3', 99, 80, 9, 18), Word('个', 115, 80, 19, 18)]]
+        self.assertEqual(suiteocr.text_of(suiteocr._together([english, chinese])),
+                         'FEATURED 27:18:51:47\n完成：3 个', 'a colon in Chinese stays wide, with no space round it')
 
 
 class ShadeTests(unittest.TestCase):
