@@ -33,12 +33,14 @@ from PySide6.QtGui import QAction, QDesktopServices, QFont, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import APP_NAME, __version__, audio, brightness, catalog, installer, releases, sensors, suitelog, win32
+from . import (APP_NAME, __version__, audio, brightness, catalog, installer, releases, sensors, suitelog, suiteocr,
+               win32)
 from .host import TrayHost
 from .hotkeys import Hotkeys, HotkeyError, normalize
 from .stats import Sampler
 from .ui import icons, pins, theme
 from .ui.launcher import CardState, LauncherWindow, placeholder_icon
+from .ui.screentext import ScreenText
 from .ui.panel import PAGES, TAB_LIMITS, TAB_LOOK, EdgePanel
 from .ui.settings import SettingsWindow, glyph_font
 from .ui.sound import HEADPHONES, SPEAKER, SoundPopup, sounds_like_headphones
@@ -52,6 +54,7 @@ CHECK_AGAIN = 15 * 60            # opening the window asks again once this has p
 QUIT_WAIT = 20                   # seconds an app gets to quit before an update
 STARTING_FOR = 20                # longest an app's card says "Starting…", for one that never comes up
 SOUND_HOTKEY = 'Ctrl+Alt+S'      # switches the sound output, until another is chosen
+TEXT_HOTKEY = 'Ctrl+Alt+T'       # copy text from the screen (ui/screentext.py)
 HELD_MOST = 6                    # notifications kept back during a game, at most (the latest)
 PROGRESS_EVERY = 0.1             # seconds between an install's progress shown on its card
 HAND_OVER_EVERY = 30             # seconds between looks at whether Hanami may restart into its update
@@ -150,6 +153,18 @@ class Settings:
     @property
     def sound_hotkey(self) -> str:
         return str(self._store.value('sound/hotkey', SOUND_HOTKEY) or '')
+
+    @property
+    def text_hotkey_on(self) -> bool:
+        return self._flag('text/hotkey_on', True)
+
+    @property
+    def text_hotkey(self) -> str:
+        return str(self._store.value('text/hotkey', TEXT_HOTKEY) or '')
+
+    def set_text_hotkey(self, on: bool, hotkey: str) -> None:
+        self._store.setValue('text/hotkey_on', 'true' if on else 'false')
+        self._store.setValue('text/hotkey', hotkey)
 
     def output(self, which: str) -> tuple[str, str] | None:
         """The output chosen as the speakers or the headphones: (Windows' id for it, its name)."""
@@ -393,9 +408,11 @@ class Controller(QObject):
         self._look_for_monitors()
         self.panel.set_edge(self.settings.panel_edge)
         self._panel_icons: dict[str, tuple] = {}
+        self.screen_text = ScreenText(self)
         self.hotkeys = Hotkeys(self)
         self.hotkeys.pressed.connect(self._hotkey)
-        self.sound_problem = self._register_hotkeys()
+        self.sound_problem = self.text_problem = ''
+        self._register_hotkeys()
         theme.on_game(self._game_changed)
         self._poll = QTimer(self, interval=2000)
         self._poll.timeout.connect(self._poll_tick)
@@ -532,15 +549,30 @@ class Controller(QObject):
 
     # ------------------------------------------------------------------ sound
 
-    def _register_hotkeys(self) -> str:
-        """The sound-output hotkey, as set; what went wrong, if it couldn't be had."""
+    def _register_hotkeys(self) -> None:
+        """The sound-output hotkey and the screen-text one, as set; what went wrong with each, if
+        it couldn't be had (sound_problem, text_problem)."""
         s = self.settings
-        problems = self.hotkeys.set({'sound': s.sound_hotkey if s.sound_hotkey_on else ''})
-        return problems.get('sound', '')
+        problems = self.hotkeys.set({'sound': s.sound_hotkey if s.sound_hotkey_on else '',
+                                     'text': s.text_hotkey if s.text_hotkey_on else ''})
+        self.sound_problem, self.text_problem = problems.get('sound', ''), problems.get('text', '')
 
     def _hotkey(self, action: str) -> None:
         if action == 'sound':
             self.switch_sound()
+        elif action == 'text':
+            self.copy_screen_text()
+
+    def copy_screen_text(self) -> None:
+        """The screens frozen, to choose text on them and copy it (ui/screentext.py) - or, open
+        already, closed."""
+        if self.screen_text.is_open:
+            self.screen_text.close()
+        elif not suiteocr.available():
+            self._say('Windows can’t read text here', 'Add a language with text recognition in Windows '
+                      'Settings, Time & language, Language & region.', icons.app_icon())
+        else:
+            self.screen_text.open()
 
     def outputs_chosen(self, present: list | None = None) -> dict:
         """The speakers and the headphones, as chosen in Settings - or, the first time, as their
@@ -800,9 +832,21 @@ class Controller(QObject):
             self.settings_window.show_sound_problem(str(error))
             return
         self.settings.set_sound(on, hotkey)
-        self.sound_problem = self._register_hotkeys()
+        self._register_hotkeys()
         if self.settings_window is not None:
             self.settings_window.show_sound_problem(self.sound_problem)
+
+    def _text_changed(self, on: bool, hotkey: str) -> None:
+        try:
+            hotkey = normalize(hotkey) if hotkey else ''
+        except HotkeyError as error:
+            self.settings_window.show_text_problem(str(error))
+            return
+        self.settings.set_text_hotkey(on, hotkey)
+        self._register_hotkeys()
+        self._update_tray()                     # its menu names the hotkey
+        if self.settings_window is not None:
+            self.settings_window.show_text_problem(self.text_problem)
 
     def version_of(self, name: str, exe: Path | None) -> str:
         """The version of the copy on this PC, if it can be told."""
@@ -1236,7 +1280,7 @@ class Controller(QObject):
         names = ', '.join(m.name for m in members)
         self.tray.setToolTip(f'Hanami - {names}' if names else 'Hanami')
         shape = ([(m.name, m.icon.cacheKey(), json.dumps(m.items, sort_keys=True)) for m in members],
-                 [app.name for app in not_running])
+                 [app.name for app in not_running], self._text_keys())
         if shape == self._tray_shape:
             return
         menu = self._menu
@@ -1253,12 +1297,19 @@ class Controller(QObject):
             for app in not_running:
                 start.addAction(app.name, lambda n=app.name: self.open_app(n))
         menu.addSeparator()
+        menu.addAction('Copy text from the screen' + (f'	{self._text_keys()}' if self._text_keys() else ''),
+                       self.copy_screen_text)
         opener = menu.addAction(icons.app_icon(), 'Open Hanami', self.show_window)
         font = QFont(opener.font())
         font.setBold(True)
         opener.setFont(font)
         menu.addAction('Settings', self.show_settings)
         menu.addAction('Quit Hanami', self.quit)
+
+    def _text_keys(self) -> str:
+        """The screen-text hotkey, for the tray menu - none until it is had (the tray comes first)."""
+        s = self.settings
+        return s.text_hotkey if s.text_hotkey_on and getattr(self, 'text_problem', 'not yet') == '' else ''
 
     def _fill(self, menu: QMenu, member) -> None:
         for item in member.items:
@@ -1298,6 +1349,9 @@ class Controller(QObject):
         for pin in self.settings.pinned:
             self._pin_icon(pin)
         self._make_window().winId()
+        if self.settings.text_hotkey_on:
+            # Windows' text readers, made off the UI thread: the first screen read took 50 ms more.
+            threading.Thread(target=suiteocr.available, daemon=True).start()
 
     def _make_window(self) -> LauncherWindow:
         if self.window is None:
@@ -1332,9 +1386,11 @@ class Controller(QObject):
                                                   (s.check_updates, s.notify_updates, s.auto_update,
                                                    s.update_hanami),
                                                   (s.sound_hotkey_on, s.sound_hotkey), s.panel_edge, s.panel_tab,
-                                                  s.pinned, s.panel_pages, s.panel_brightness)
+                                                  s.pinned, s.panel_pages, s.panel_brightness,
+                                                  (s.text_hotkey_on, s.text_hotkey))
             self.settings_window.startup_changed.connect(self._startup_changed)
             self.settings_window.sound_changed.connect(self._sound_changed)
+            self.settings_window.text_changed.connect(self._text_changed)
             self.settings_window.output_chosen.connect(self._output_chosen)
             self.settings_window.panel_changed.connect(self._panel_changed)
             self.settings_window.tab_changed.connect(self._tab_changed)
@@ -1357,6 +1413,7 @@ class Controller(QObject):
             outputs = []
         self.settings_window.show_outputs(outputs, self.outputs_chosen(outputs))
         self.settings_window.show_sound_problem(self.sound_problem)
+        self.settings_window.show_text_problem(self.text_problem)
         self._show_checked()
         self.settings_window.show()
         self.settings_window.raise_()
@@ -1497,6 +1554,10 @@ def self_test(argv: list[str]) -> int:
         icons.render_app_icon(32)
         LauncherWindow().grab()                  # painted, never shown
         SettingsWindow([], False, (True, True, False)).grab()
+        ScreenText()
+        # Windows' text recognition came along (whether or not this PC has a reader set up).
+        from winrt.windows.graphics.imaging import SoftwareBitmap  # noqa: F401
+        from winrt.windows.media.ocr import OcrEngine  # noqa: F401
         win32.running_programs()
         releases.verify_and_parse                # the release checks are in the build
         installer.exe_version(Path(sys.executable))

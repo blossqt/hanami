@@ -342,6 +342,7 @@ class SettingsWindow(QWidget):
     updates_changed = Signal(bool, bool, bool)      # look by itself, tell me, install by itself
     hanami_updates_changed = Signal(bool)           # Hanami updates itself
     sound_changed = Signal(bool, str)               # the hotkey on, the hotkey
+    text_changed = Signal(bool, str)                # copying text from the screen: the hotkey on, the hotkey
     output_chosen = Signal(str, str, str)           # 'speakers' or 'headphones', the output's id ('' for none), its name
     panel_changed = Signal(str)                     # the edge the panel slides out at: 'right', 'left' or '' (off)
     tab_changed = Signal(int, int, int)             # the panel's tab: its length and thickness (px), opacity at rest (%)
@@ -353,13 +354,14 @@ class SettingsWindow(QWidget):
     show_page = Signal(str)
     open_url = Signal(str)
 
-    PAGES = [('', 'General'), ('', 'Edge panel'), ('', 'Appearance'), ('', 'Games'), ('', 'Sound'), ('', 'Updates'),
-             ('', 'About')]
+    PAGES = [('', 'General'), ('', 'Edge panel'), ('', 'Appearance'), ('', 'Games'), ('', 'Sound'),
+             ('', 'Screen text'), ('', 'Updates'), ('', 'About')]
 
     def __init__(self, start_with: list[str], starts_with_windows: bool, updates: tuple[bool, bool, bool],
                  sound: tuple[bool, str] = (True, ''), panel_edge: str = 'right',
                  tab: tuple[int, int, int] | None = None, pinned: list | None = None,
-                 panel_pages: list[str] | None = None, brightness_on: bool = True):
+                 panel_pages: list[str] | None = None, brightness_on: bool = True,
+                 text: tuple[bool, str] = (True, '')):
         super().__init__()
         self.setWindowTitle('Hanami settings')
         self.setWindowIcon(icons.app_icon())
@@ -390,6 +392,7 @@ class SettingsWindow(QWidget):
         self.pages.addWidget(self._appearance())
         self.pages.addWidget(self._games())
         self.pages.addWidget(self._sound(*sound))
+        self.pages.addWidget(self._screen_text(*text))
         self.pages.addWidget(self._updates(*updates))
         self.pages.addWidget(self._about())
         self.nav.chosen.connect(self.pages.setCurrentIndex)
@@ -718,6 +721,41 @@ class SettingsWindow(QWidget):
         layout.addWidget(frame)
         layout.addStretch(1)
         return page
+
+    def _screen_text(self, on: bool, hotkey: str) -> QWidget:
+        page, layout = self._page('Screen text', '')
+        frame, box = _section('Copy text from the screen')
+        holder, self.text_on = _switch('Open with a hotkey', 'The screen stays as it is while you draw round '
+                                       'text, or drag across it, to copy it. Windows reads it, on this PC.', on)
+        self.text_on.toggled.connect(self._text_edited)
+        box.addWidget(holder)
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        row.addWidget(_label('Hotkey:', 9.5))
+        self.text_key = QKeySequenceEdit(QKeySequence(hotkey))
+        self.text_key.setMaximumSequenceLength(1)
+        self.text_key.setClearButtonEnabled(True)
+        self.text_key.setFixedWidth(200)
+        self.text_key.editingFinished.connect(self._text_edited)
+        self.text_key.keySequenceChanged.connect(lambda keys: keys.isEmpty() and self._text_edited())
+        row.addWidget(self.text_key)
+        row.addStretch(1)
+        box.addLayout(row)
+        self.text_problem = _label('', 9, role='error', wrap=True)
+        self.text_problem.hide()
+        box.addWidget(self.text_problem)
+        layout.addWidget(frame)
+        layout.addStretch(1)
+        return page
+
+    def show_text_problem(self, problem: str) -> None:
+        self.text_problem.setText(problem)
+        self.text_problem.setVisible(bool(problem))
+
+    def _text_edited(self, *_) -> None:
+        keys = self.text_key.keySequence()
+        hotkey = keys.toString(QKeySequence.PortableText) if not keys.isEmpty() else ''
+        self.text_changed.emit(self.text_on.isChecked(), hotkey)
 
     def show_outputs(self, outputs: list, chosen: dict) -> None:
         """The sound outputs plugged in now, with the ones chosen as speakers and headphones

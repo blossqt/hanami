@@ -346,6 +346,59 @@ class SoundTests(_Controlled):
         self.controller.settings_window.close()
 
 
+class ScreenTextTests(_Controlled):
+    """The hotkey that freezes the screen for copying text from it (ui/screentext.py)."""
+
+    def setUp(self):
+        super().setUp()
+        self.controller.settings.set_text_hotkey(True, hanami.TEXT_HOTKEY)     # as another test may have left it
+
+    def tearDown(self):
+        self.controller.settings.set_text_hotkey(True, hanami.TEXT_HOTKEY)
+        super().tearDown()
+
+    def test_its_hotkey_and_tray_item(self):
+        s = self.controller.settings
+        self.assertEqual((s.text_hotkey_on, s.text_hotkey), (True, hanami.TEXT_HOTKEY))
+        self.controller.text_problem = ''
+        self.controller._update_tray()
+        items = [action.text() for action in self.controller._menu.actions()]
+        self.assertIn(f'Copy text from the screen	{hanami.TEXT_HOTKEY}', items)
+
+    def test_a_hotkey_that_cant_be_had_says_so(self):
+        self.controller.settings_window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY),
+                                                         text=(True, hanami.TEXT_HOTKEY))
+        self.controller._text_changed(True, 'T')
+        self.assertTrue(self.controller.settings_window.text_problem.text())
+        self.assertEqual(self.controller.settings.text_hotkey, hanami.TEXT_HOTKEY, 'the old one is kept')
+        self.controller._text_changed(True, 'alt+ctrl+y')
+        self.assertEqual(self.controller.settings.text_hotkey, 'Ctrl+Alt+Y')
+        self.controller._text_changed(False, 'Ctrl+Alt+Y')
+        self.assertFalse(self.controller.settings.text_hotkey_on)
+        items = [action.text() for action in self.controller._menu.actions()]
+        self.assertIn('Copy text from the screen', items, 'still in the tray, without a hotkey named')
+        self.controller.settings_window.close()
+
+    def test_the_hotkey_opens_and_closes_it(self):
+        from unittest import mock
+        opened = []
+        with mock.patch.object(hanami.suiteocr, 'available', lambda: True),                 mock.patch.object(self.controller.screen_text, 'open', lambda: opened.append(True)):
+            self.controller._hotkey('text')
+            self.assertEqual(opened, [True])
+            self.controller.screen_text.shades = [object()]          # as if it were open
+            with mock.patch.object(self.controller.screen_text, 'close',
+                                   lambda: setattr(self.controller.screen_text, 'shades', [])):
+                self.controller._hotkey('text')
+            self.assertFalse(self.controller.screen_text.is_open)
+
+    def test_without_a_reader_it_says_so(self):
+        from unittest import mock
+        with mock.patch.object(hanami.suiteocr, 'available', lambda: False):
+            self.controller.copy_screen_text()
+        self.assertEqual(self.told[-1][0], 'Windows can’t read text here')
+        self.assertFalse(self.controller.screen_text.is_open)
+
+
 class InstallProgressTests(_Controlled):
     """An install's progress, as its window shows it. The download and the unpacking are stand-ins
     that report as often as real ones do - every 64 KB chunk, every file - and nothing is fetched or

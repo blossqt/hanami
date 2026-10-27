@@ -1,2 +1,10 @@
 PySide6-Essentials==6.11.2
 pyinstaller==6.22.3
+# Windows' own text recognition (suiteocr.py: Hanami's screen text, Dropshift's Copy text)
+winrt-runtime==3.2.1
+winrt-Windows.Foundation==3.2.1
+winrt-Windows.Foundation.Collections==3.2.1
+winrt-Windows.Globalization==3.2.1
+winrt-Windows.Graphics.Imaging==3.2.1
+winrt-Windows.Media.Ocr==3.2.1
+winrt-Windows.Storage.Streams==3.2.1

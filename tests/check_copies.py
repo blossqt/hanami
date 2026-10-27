@@ -35,6 +35,7 @@ COPIES = {
     ROOT / 'app' / 'hanami' / 'suitetray.py': QT_APPS,
     ROOT / 'app' / 'hanami' / 'ui' / 'suitetheme.py': [app / 'ui' for app in QT_APPS],
     ROOT / 'app' / 'hanami' / 'suitelog.py': QT_APPS + [DOCUMENTS / 'homework-hub'],
+    ROOT / 'app' / 'hanami' / 'suiteocr.py': [DOCUMENTS / 'Dropshift' / 'app' / 'dropshift'],
     ROOT / 'app' / 'hanami' / 'ed25519.py': [ROOT / 'build'] + RELEASED_BY_THE_KIT,
     ROOT / 'build' / 'release.py': RELEASED_BY_THE_KIT,
     ROOT / 'build' / 'release.ps1': RELEASED_BY_THE_KIT,

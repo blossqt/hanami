@@ -60,6 +60,7 @@ holds one icon however many of them are running:
     Grabbit       ▸  Show Grabbit · Add link… · Exit
     Homework Hub  ▸  Open dashboard · Copy pairing token · …
     Start         ▸  the suite apps that aren't running
+    Copy text from the screen   Ctrl+Alt+T
     Open Hanami
     Quit Hanami
 
@@ -84,6 +85,26 @@ Click the blossom (or open Hanami from Start) for every suite app on one page:
 suite. **Start with Hanami:** whenever Hanami starts - at sign-in or opened
 by hand - it starts the apps ticked there that aren't running yet, in the
 background.
+
+## Copy text from the screen
+
+Like Circle to Search on an Android phone: press **Ctrl+Alt+T** (or choose it in the tray) and
+every screen stays as it is, a little darker, with a pink glow round its edge while Windows reads
+the text on it. Then:
+
+- **draw round** what you want - a circle, a scribble, a box - and the words inside are chosen;
+  a stroke along a line of text chooses the words it crosses;
+- or **press on a word and drag**, as in a document. A click chooses one word, a double-click its
+  line, **Ctrl+A** all the text on that screen.
+
+**Copy** (or Enter, or Ctrl+C) puts it on the clipboard and closes; **Search** looks it up on
+Google. **Esc** or a right-click closes without copying.
+
+It reads any text you can see - pictures, videos, apps that won't let you select - with Windows'
+own text recognition, on this PC: nothing is sent anywhere, and nothing read is kept. Windows
+reads the languages set up in Settings, Time & language; with Chinese, Japanese or Korean set up
+as well as English, both are read and put together. Settings > Screen text changes the hotkey or
+turns it off.
 
 ## The edge panel
 
