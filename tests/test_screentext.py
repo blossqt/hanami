@@ -86,6 +86,27 @@ class OcrTests(unittest.TestCase):
         painter.end()
         self.assertIn('GRAVE MATTERS', [line.text for line in suiteocr.recognize(image)])
 
+    def test_columns_level_with_each_other(self):
+        image = QImage(1400, 300, QImage.Format_ARGB32_Premultiplied)
+        image.fill(QColor('#1f1e1d'))
+        painter = QPainter(image)
+        painter.setPen(QColor('#e8e6e3'))
+        font = QFont('Segoe UI')
+        font.setPixelSize(15)
+        painter.setFont(font)
+        for n, text in enumerate(('Hanami', 'Bitwarden autofill across', 'Mod compatibility update')):
+            painter.drawText(40, 40 + n * 34, text)
+        for n, text in enumerate(('Big titles: the English reader never finds words in Chinese text.',
+                                  'stays English unless Chinese characters cover most of it.',
+                                  'The timer: the English reader also skipped the timer above the title')):
+            painter.drawText(500, 30 + n * 24, text)
+        painter.drawText(1290, 52, 'Show more')
+        painter.end()
+        lines = [line.text for line in suiteocr.recognize(image)]
+        self.assertIn('Hanami', lines)
+        self.assertIn('stays English unless Chinese characters cover most of it.', lines)
+        self.assertIn('Show more', lines)
+
     def test_places_are_the_pictures_own(self):
         lines = suiteocr.recognize(page())
         invoice = next(line for line in lines if line.text.startswith('Invoice'))
@@ -155,6 +176,13 @@ class JoiningTests(unittest.TestCase):
         self.assertEqual(suiteocr.text_of(suiteocr._together([english, chinese])),
                          'FEATURED 27:18:51:47\n完成：3 个', 'a colon in Chinese stays wide, with no space round it')
 
+    def test_columns_stay_apart(self):
+        # A sidebar item, a message's line and a side panel's link, level across a chat app.
+        english = [[Word('Hanami', 40, 133, 55, 15)], [Word('Big', 500, 128, 28, 18), Word('titles:', 533, 128, 45, 18)],
+                   [Word('Show', 1290, 138, 40, 15), Word('more', 1334, 138, 40, 15)]]
+        lines = suiteocr._together([english, [[Word('合', 520, 160, 18, 18)]]])
+        self.assertEqual([line.text for line in lines], ['Big titles:', 'Hanami', 'Show more', '合'])
+
 
 class ShadeTests(unittest.TestCase):
     """The frozen screen, with the words as Windows would give them (no reading needed)."""
@@ -207,6 +235,33 @@ class ShadeTests(unittest.TestCase):
         self.assertEqual(shade.text(), 'A-7731 due\nTotal $1,249.50')
         shade.mouseMoveEvent(_move(self.at(70, 180)))               # back, past where it began
         self.assertEqual(shade.text(), 'Invoice A-7731')
+
+    def test_a_drag_down_a_message_leaves_the_sidebar_out(self):
+        shade = self.shade
+        side = [Word(text, 40, 133 + n * 34, 120, 15) for n, text in enumerate(('Hanami', 'Bitwarden', 'Mod'))]
+        message = [(Word('Big', 500, 128, 28, 18), Word('titles:', 533, 128, 45, 18)),
+                   (Word('stays', 500, 152, 38, 18), Word('English', 543, 152, 52, 18)),
+                   (Word('The', 500, 176, 28, 18), Word('timer:', 533, 176, 45, 18))]
+        lines = ([Line((word,)) for word in side] + [Line(words) for words in message]
+                 + [Line((Word('Show', 1290, 138, 40, 15), Word('more', 1334, 138, 40, 15)))])
+        shade.take(sorted(lines, key=lambda line: (line.top, line.words[0].x)))     # as _together gives them
+        shade.mousePressEvent(_press(self.at(550, 136)))            # on titles:
+        shade.mouseMoveEvent(_move(self.at(510, 184)))              # down to The
+        self.assertEqual(shade.text(), 'titles:\nstays English\nThe')
+        shade.mouseMoveEvent(_move(self.at(60, 175)))               # out to the sidebar: it is taken in
+        self.assertIn('Bitwarden', shade.text())
+
+    def test_a_drag_goes_on_as_the_rest_is_read(self):
+        shade = self.shade
+        shade.reading = True
+        shade.take([Line((Word('Invoice', 60, 170, 70, 20), Word('A-7731', 136, 170, 60, 20))),
+                    Line((Word('Total', 60, 280, 50, 20),))], done=False)
+        shade.mousePressEvent(_press(self.at(150, 180)))            # on A-7731
+        shade.take([Line((Word('发票', 20, 120, 30, 20),)),        # read later, before it all
+                    Line((Word('Invoice', 60, 170, 70, 20), Word('A-7731', 136, 170, 60, 20))),
+                    Line((Word('Total', 60, 280, 50, 20),))], done=True)
+        shade.mouseMoveEvent(_move(self.at(70, 290)))               # down to Total
+        self.assertEqual(shade.text(), 'A-7731\nTotal', 'from where it began, not a word before it')
 
     def test_double_click_a_line_and_select_all(self):
         shade = self.shade

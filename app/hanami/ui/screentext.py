@@ -6,7 +6,8 @@ you choose some:
 - draw round it - a circle, a scribble, a box - and the words inside are chosen; a stroke along
   a line of text chooses the words it crosses;
 - or press on a word and drag, and the text from there to where you let go is chosen, as in a
-  document. A click chooses one word, a double-click its line, Ctrl+A everything on that screen.
+  document - but only in the columns the drag covers, not a sidebar beside it. A click chooses
+  one word, a double-click its line, Ctrl+A everything on that screen.
 
 Copy (Enter or Ctrl+C) puts the text on the clipboard and closes; Search looks it up on Google in
 the default browser. Esc, a right-click or going to another window closes without copying.
@@ -104,6 +105,7 @@ class _Shade(QWidget):
         self.words: list = []            # suiteocr.Word, in reading order
         self.line_of: list[int] = []     # each word's line
         self.rects: list[QRectF] = []    # each word's place on this window
+        self.spans: list[tuple] = []     # each line's (left, right) on this window
         self.reading = True
         self.failed = False
         self.chosen: list[int] = []
@@ -165,6 +167,7 @@ class _Shade(QWidget):
             held = []
         else:
             held = [self.rects[index] for index in self.chosen]
+        anchor = self.rects[self._anchor] if 0 <= self._anchor < len(self.rects) else None
         self.reading = False
         self.failed = lines is None and not self.words
         if lines is None:
@@ -176,6 +179,15 @@ class _Shade(QWidget):
                 self.words.append(word)
                 self.line_of.append(number)
         self.rects = [_word_rect(word, self.ratio) for word in self.words]
+        self.spans = []
+        for index, rect in enumerate(self.rects):
+            if self.line_of[index] == len(self.spans):
+                self.spans.append((rect.left(), rect.right()))
+            else:
+                left, right = self.spans[-1]
+                self.spans[-1] = (min(left, rect.left()), max(right, rect.right()))
+        if anchor is not None:          # a drag begun on the first language's words goes on from there
+            self._anchor = next((i for i, rect in enumerate(self.rects) if rect.intersects(anchor)), -1)
         if held:
             self.chosen = []
             self.choose(i for i, rect in enumerate(self.rects) if any(rect.intersects(old) for old in held))
@@ -206,6 +218,17 @@ class _Shade(QWidget):
         return min(range(len(self.rects)), key=lambda i: (
             max(0.0, abs(self.rects[i].center().y() - point.y()) - self.rects[i].height() / 2) * 4 +
             max(0.0, abs(self.rects[i].center().x() - point.x()) - self.rects[i].width() / 2)))
+
+    def between(self, a: int, b: int) -> list[int]:
+        """The words from a to b, as a text selection takes them, kept to their columns: a line
+        between them counts only where it shares some width with a's line or b's. A drag down a
+        message took in the sidebar beside it, line by line."""
+        a, b = min(a, b), max(a, b)
+        ends = (self.line_of[a], self.line_of[b])
+        left = min(self.spans[line][0] for line in ends)
+        right = max(self.spans[line][1] for line in ends)
+        return [i for i in range(a, b + 1) if self.line_of[i] in ends
+                or (self.spans[self.line_of[i]][0] < right and self.spans[self.line_of[i]][1] > left)]
 
     def choose(self, indices) -> None:
         before, self.chosen = self.chosen, sorted(set(indices))
@@ -299,7 +322,7 @@ class _Shade(QWidget):
         elif self._anchor >= 0:
             reached = self._nearest(point)
             if reached >= 0:
-                self.choose(range(min(self._anchor, reached), max(self._anchor, reached) + 1))
+                self.choose(self.between(self._anchor, reached))
 
     def mouseReleaseEvent(self, event):
         if event.button() != Qt.LeftButton or not self._drawing:
