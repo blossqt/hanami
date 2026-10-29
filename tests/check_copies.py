@@ -11,6 +11,8 @@ Written once, here in Hanami, and copied into each app:
                     each app's ui\\theme.py imports it and adds its own colours
     suitelog.py     the Qt apps and Homework Hub: a windowed exe's prints, tracebacks and
                     native crashes, in a log
+    suiteocr.py     Dropshift: Windows' text recognition
+    suiteweb.py     Grabbit and Dropshift: a site's full-size picture, and its robot check
     release kit     build\\release.py, release.ps1 and ed25519.py: publishing a
                     release Hanami will install (apps without a release
                     process of their own - Grabbit and Homework Hub have theirs)
@@ -36,6 +38,8 @@ COPIES = {
     ROOT / 'app' / 'hanami' / 'ui' / 'suitetheme.py': [app / 'ui' for app in QT_APPS],
     ROOT / 'app' / 'hanami' / 'suitelog.py': QT_APPS + [DOCUMENTS / 'homework-hub'],
     ROOT / 'app' / 'hanami' / 'suiteocr.py': [DOCUMENTS / 'Dropshift' / 'app' / 'dropshift'],
+    ROOT / 'app' / 'hanami' / 'suiteweb.py': [DOCUMENTS / 'Dropshift' / 'app' / 'dropshift',
+                                              DOCUMENTS / 'Grabbit' / 'app' / 'grabbit'],
     ROOT / 'app' / 'hanami' / 'ed25519.py': [ROOT / 'build'] + RELEASED_BY_THE_KIT,
     ROOT / 'build' / 'release.py': RELEASED_BY_THE_KIT,
     ROOT / 'build' / 'release.ps1': RELEASED_BY_THE_KIT,
