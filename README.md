@@ -117,8 +117,8 @@ bottom showing which is in sight:
 - **Stats**: the processor and memory, and, with an NVIDIA graphics card, its load, memory and
   temperature (read from NVIDIA's own `nvml.dll`), once a second while the page is in sight.
 
-Under every page, a sun button that drops down a slider for each monitor that has DDC/CI on
-(set over the cable, as the monitor's own buttons would), then the sound output switch and a
+Under every page, a sliders button that drops down the sound's volume and a slider for each
+monitor that has DDC/CI on (set over the cable, as the monitor's own buttons would), then the sound output switch and a
 button muting the microphone. Settings > Edge panel chooses its edge, its pages, the sliders, its tab, and the
 shortcuts. It keeps away from games and anything full screen.
 

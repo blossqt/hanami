@@ -186,6 +186,65 @@ def next_output(chosen: list[str]) -> Output | None:
     return ring[(ids.index(now) + 1) % len(ring)] if now in ids else ring[0]
 
 
+# --------------------------------------------------------------------------- the volume
+
+def _output_volume(enumerator: ctypes.c_void_p) -> ctypes.c_void_p | None:
+    """The default output's IAudioEndpointVolume, to be released - None with no output."""
+    device = ctypes.c_void_p()
+    try:
+        _call(enumerator, 4, E_RENDER, 1, ctypes.byref(device),
+              argtypes=(ctypes.c_int, ctypes.c_int, ctypes.c_void_p))                   # GetDefaultAudioEndpoint
+    except OSError:
+        return None
+    try:
+        return _volume(device)
+    finally:
+        _release(device)
+
+
+def volume() -> int | None:
+    """How loud the output sound goes to is, 0 to 100 as Windows shows it - None with no output."""
+    try:
+        enumerator = _create(CLSID_MMDeviceEnumerator, IID_IMMDeviceEnumerator)
+    except OSError:
+        return None
+    try:
+        endpoint = _output_volume(enumerator)
+        if endpoint is None:
+            return None
+        try:
+            level = ctypes.c_float()
+            _call(endpoint, 9, ctypes.byref(level), argtypes=(ctypes.c_void_p,))    # GetMasterVolumeLevelScalar
+            return round(level.value * 100)
+        finally:
+            _release(endpoint)
+    finally:
+        _release(enumerator)
+
+
+def set_volume(percent: int) -> None:
+    """Set the output's volume, 0 to 100 - unmuting it, as Windows' own slider does."""
+    try:
+        enumerator = _create(CLSID_MMDeviceEnumerator, IID_IMMDeviceEnumerator)
+    except OSError as error:
+        raise AudioError(f'Windows would not find its sound output ({error})') from None
+    try:
+        endpoint = _output_volume(enumerator)
+        if endpoint is None:
+            return
+        try:
+            _call(endpoint, 7, max(0.0, min(1.0, percent / 100)), None,
+                  argtypes=(ctypes.c_float, ctypes.c_void_p))                           # SetMasterVolumeLevelScalar
+            muted = wintypes.BOOL()
+            _call(endpoint, 15, ctypes.byref(muted), argtypes=(ctypes.c_void_p,))      # GetMute
+            if muted.value and percent > 0:
+                _call(endpoint, 14, False, None, argtypes=(wintypes.BOOL, ctypes.c_void_p))   # SetMute
+        finally:
+            _release(endpoint)
+    finally:
+        _release(enumerator)
+
+
 # --------------------------------------------------------------------------- the microphone
 
 def _microphones(enumerator: ctypes.c_void_p) -> list[ctypes.c_void_p]:

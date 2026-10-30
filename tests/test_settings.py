@@ -157,6 +157,11 @@ class _Controlled(unittest.TestCase):
         from hanami.ui import suitetheme
         self._monitors = mock.patch.object(hanami.brightness, 'Monitors', _Monitors)
         self._monitors.start()
+        self.volume_now, self.volumes_set = None, []        # never the real volume: no output, unless a test says
+        self._volume = [mock.patch.object(hanami.audio, 'volume', lambda: self.volume_now),
+                        mock.patch.object(hanami.audio, 'set_volume', self.volumes_set.append)]
+        for patch in self._volume:
+            patch.start()
         self.suitetheme = suitetheme
         self._key = suitetheme._LOOK_KEY
         suitetheme._LOOK_KEY = r'Software\blossqt\SuiteSettingsTest'
@@ -174,6 +179,8 @@ class _Controlled(unittest.TestCase):
         self.controller.hotkeys.clear()
         self.controller._server.close()
         self._monitors.stop()
+        for patch in self._volume:
+            patch.stop()
         hanami.DEV = self._dev
         for name, original in self._originals.items():
             setattr(hanami.Controller, name, original)
@@ -891,6 +898,38 @@ class PanelTests(_Controlled):
         finally:
             window.close()
 
+    def test_volume(self):
+        from PySide6.QtCore import QPoint, QPointF, Qt
+        from PySide6.QtGui import QWheelEvent
+        from PySide6.QtTest import QTest
+        self.controller._brightness_changed(False)          # the volume alone
+        self._open()
+        self.assertFalse(self.panel.fold.isVisibleTo(self.panel), 'no output yet: no sliders button')
+        self.controller._sound_polled('', None, 53)
+        self.assertTrue(self.panel.fold.isVisibleTo(self.panel), 'a sliders button, brightness off or not')
+        QTest.mouseClick(self.panel.fold, Qt.LeftButton)
+        row, track = self.panel.volume, self.panel.volume._track()
+        self.assertTrue(row.isVisibleTo(self.panel))
+        self.assertEqual((row.name, row.value), ('Volume', 53))
+        y = round(track.center().y())
+        QTest.mousePress(row, Qt.LeftButton, Qt.NoModifier, QPoint(round(track.left() + track.width() / 4), y))
+        QTest.mouseRelease(row, Qt.LeftButton, Qt.NoModifier, QPoint(round(track.left() + track.width() / 4), y))
+        wheel = QWheelEvent(QPointF(10, 10), QPointF(10, 10), QPoint(0, 0), QPoint(0, 120), Qt.NoButton,
+                            Qt.NoModifier, Qt.NoScrollPhase, False)
+        position = self.panel.pages.position
+        qt.sendEvent(row, wheel)
+        self.assertEqual(row.value, 27, 'the wheel over it: up a step')
+        self.assertEqual(self.panel.pages.position, position, 'and the page stays')
+        deadline = time.monotonic() + 3
+        while self.volumes_set[-1:] != [27] and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(self.volumes_set[-1:], [27], 'set, on the sound thread')
+        self.controller._sound_polled('', None, 60)
+        self.assertEqual(row.value, 27, 'a reading from before doesn’t move it back')
+        self.controller._sound_polled('', None, None)
+        self.assertFalse(self.panel.fold.isVisibleTo(self.panel), 'no output any more: gone')
+        self.controller._brightness_changed(True)
+
     def test_brightness(self):
         from PySide6.QtCore import QPoint, Qt
         from PySide6.QtTest import QTest
@@ -902,7 +941,7 @@ class PanelTests(_Controlled):
         self.controller._monitors_found([Monitor('a', 'TYPEC', 40), Monitor('b', 'DELL G2524H', 75)])
         rows = self.panel.brightness_rows
         self.assertEqual([(row.name, row.value) for row in rows], [('TYPEC', 40), ('DELL G2524H', 75)])
-        self.assertTrue(self.panel.fold.isVisibleTo(self.panel), 'a sun button')
+        self.assertTrue(self.panel.fold.isVisibleTo(self.panel), 'a sliders button')
         self.assertFalse(self.panel.screens.isVisibleTo(self.panel), 'its sliders folded away')
         folded, top = self.panel.height(), self.panel.y()
         QTest.mouseClick(self.panel.fold, Qt.LeftButton)
@@ -938,7 +977,7 @@ class PanelTests(_Controlled):
         self.assertEqual(monitors.looked, looked, 'off: not looked at')
         self.controller._brightness_changed(True)
         self.controller._monitors_found([])
-        self.assertFalse(self.panel.fold.isVisibleTo(self.panel), 'no monitor answers: no sun button')
+        self.assertFalse(self.panel.fold.isVisibleTo(self.panel), 'no monitor answers, no output: no sliders button')
         window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY), 'right')
         window.brightness_changed.connect(self.controller._brightness_changed)
         try:

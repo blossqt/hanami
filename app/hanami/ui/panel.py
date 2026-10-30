@@ -2,9 +2,10 @@
 of glass slides out there over a photo of blossom. It has three pages, turned with the scroll wheel
 (or the dots along its bottom, showing which is in sight): the suite's apps, what is pinned to it
 in Settings (programs, files, folders, websites), and how busy the PC is (stats.py) - sampled once a
-second only while that page is in sight. Under them, on every page, a sun button that drops
-down a slider for each monitor that has one (brightness.py) - the panel growing to hold them, and
-folding them away again as it goes - then the sound button and the microphone's mute button.
+second only while that page is in sight. Under them, on every page, a sliders button that drops
+down the sound's volume and a brightness slider for each monitor that has one (brightness.py) -
+the panel growing to hold them, and folding them away again as it goes - then the sound button
+and the microphone's mute button.
 
 The tab shows where the panel is, as Samsung's edge panel's does. It sits in the middle of the edge
 until it is moved - the tab dragged up or down, or the handle along the panel's top (place: where
@@ -48,8 +49,9 @@ STATS_QUICK = 250, 2.0  # ms between samples, for the first s of it: so the proc
                         # shows as soon as Hanami Sensors has it, when it has just been started
 SET_HELD = 2.0          # s after a brightness slider is moved during which a reading doesn't move it back
                         # (the reading may be from before)
-FOLD_MS = 220           # the brightness sliders dropping down, or folding away
-SUN = ''          # Segoe Fluent Icons: Brightness
+FOLD_MS = 220           # the volume and brightness sliders dropping down, or folding away
+LEVELS = ''       # Segoe Fluent Icons: Equalizer - two sliders, for the volume and brightness
+WHEEL_STEP = 2          # % a slider moves for each notch of the scroll wheel over it
 MARGIN = 10           # between the panel and the screen's edge
 NEAR = 48               # px in from the screen's edge that count as at it
 DWELL = 0.3             # s the pointer rests at the edge before the panel comes out
@@ -376,12 +378,12 @@ class _Stat(QWidget):
         painter.end()
 
 
-class _Brightness(QWidget):
-    """A monitor's brightness: its name and how bright on a line, as the stats are, and under them a
-    slider - dragged, or clicked along, it sets it as it goes."""
-    changed = Signal(str, int)          # the monitor's key, its brightness (%)
+class _Level(QWidget):
+    """A monitor's brightness, or the sound's volume: its name and how much on a line, as the stats
+    are, and under them a slider - dragged, clicked along or scrolled over, it sets it as it goes."""
+    changed = Signal(str, int)          # the monitor's key ('volume' for the sound), its level (%)
 
-    def __init__(self, key: str, name: str, value: int):
+    def __init__(self, key: str, name: str, value: int, what: str = 'brightness'):
         super().__init__()
         self.key, self.name, self.value = key, name, value
         self.held = False
@@ -389,11 +391,11 @@ class _Brightness(QWidget):
         self._hover = False
         self.setFixedSize(INNER, 32)
         self.setCursor(Qt.PointingHandCursor)
-        self.setAccessibleName(f'{name} brightness')
+        self.setAccessibleName(f'{name} {what}'.strip())
         self.setAccessibleDescription(f'{value}%')
 
     def show_value(self, value: int) -> None:
-        """The monitor's brightness as read - unless it is being moved here, or just was."""
+        """The level as read - unless it is being moved here, or just was."""
         if self.held or time.monotonic() - self.set_at < SET_HELD:
             return
         self.value = value
@@ -405,7 +407,10 @@ class _Brightness(QWidget):
 
     def _move(self, x: float) -> None:
         track = self._track()
-        value = round(max(0.0, min(1.0, (x - track.left()) / track.width())) * 100)
+        self._set(round(max(0.0, min(1.0, (x - track.left()) / track.width())) * 100))
+
+    def _set(self, value: int) -> None:
+        value = max(0, min(100, value))
         self.set_at = time.monotonic()
         if value != self.value:
             self.value = value
@@ -427,6 +432,12 @@ class _Brightness(QWidget):
             self._move(event.position().x())
             self.held = False
             self.update()
+
+    def wheelEvent(self, event):
+        notches = event.angleDelta().y() / 120
+        if notches:
+            self._set(self.value + (round(notches * WHEEL_STEP) or (WHEEL_STEP if notches > 0 else -WHEEL_STEP)))
+        event.accept()                  # not the panel's: it would turn the page
 
     def enterEvent(self, event):
         self._hover = True
@@ -465,15 +476,16 @@ class _Brightness(QWidget):
 
 
 class _Fold(QWidget):
-    """The brightness button: a sun, nothing more (the user's wish). Clicked, the brightness sliders
-    drop down under it, or fold away; it lights up pink as they come (opened: 0 folded, 1 down)."""
+    """The sliders button: an icon of two sliders, nothing more (the user's wish: no text). Clicked,
+    the volume and brightness sliders drop down under it, or fold away; it lights up pink as they
+    come (opened: 0 folded, 1 down)."""
     clicked = Signal()
 
     def __init__(self):
         super().__init__()
         self.setFixedSize(INNER, 28)
         self.setCursor(Qt.PointingHandCursor)
-        self.setAccessibleName('Brightness')
+        self.setAccessibleName('Volume and brightness')
         self.setAccessibleDescription('folded')
         self.opened = 0.0
         self._hover = False
@@ -515,7 +527,7 @@ class _Fold(QWidget):
         glyph = QColor(theme.ON_ACCENT) if self.opened > 0.5 else c.text
         painter.setPen(glyph)
         painter.setFont(glyph_font(12))
-        painter.drawText(QRectF(self.rect()), Qt.AlignCenter, SUN)
+        painter.drawText(QRectF(self.rect()), Qt.AlignCenter, LEVELS)
         painter.end()
 
 
@@ -665,6 +677,7 @@ class EdgePanel(QWidget):
     add_pins = Signal()                 # the plus after them: to Settings, to pin something
     mic_clicked = Signal()
     brightness_set = Signal(str, int)   # a monitor's key, its brightness (%) - as its slider moves
+    volume_set = Signal(int)            # the sound's volume (%) - as its slider moves
     moved = Signal(float)              # dropped by its handle: where along the edge it is now (place)
     output_clicked = Signal(str)        # 'speakers' or 'headphones'
     showing = Signal()                  # about to come out: the apps and the sound, as they are now
@@ -731,18 +744,22 @@ class EdgePanel(QWidget):
         self.pages.add(stats_page)
         self.pages.changed.connect(self._page_turned)
         layout.addWidget(self.pages)
-        self.fold = _Fold()                         # the sun: the brightness sliders drop down under it
+        self.fold = _Fold()                         # the sliders drop down under it
         self.fold.clicked.connect(lambda: self._fold_to(not self.screens_open))
         self.fold.hide()
         layout.addWidget(self.fold)
         self.screens = QWidget()                    # as much of the sliders as has dropped down
         self.screens.hide()
-        self._sliders = QWidget(self.screens)       # a brightness slider for each monitor that has one
+        self._sliders = QWidget(self.screens)       # the volume, then a brightness slider for each monitor
         self._sliders.setFixedWidth(INNER)
         self._screens = QVBoxLayout(self._sliders)
         self._screens.setContentsMargins(0, 0, 0, 0)
         self._screens.setSpacing(4)
-        self.brightness_rows: list[_Brightness] = []
+        self.volume = _Level('volume', 'Volume', 0, what='')
+        self.volume.changed.connect(lambda _, value: self.volume_set.emit(value))
+        self.volume.hide()                          # until there is an output to set
+        self._screens.addWidget(self.volume)
+        self.brightness_rows: list[_Level] = []
         self._brightness_on = True
         self.screens_open = False
         self._folding: QVariantAnimation | None = None
@@ -830,23 +847,33 @@ class EdgePanel(QWidget):
             row.deleteLater()
         self.brightness_rows = []
         for monitor in monitors:
-            row = _Brightness(monitor.key, monitor.name, monitor.value)
+            row = _Level(monitor.key, monitor.name, monitor.value)
             row.changed.connect(self.brightness_set)
             self.brightness_rows.append(row)
             self._screens.addWidget(row)
-        self._screens.activate()
-        self._sliders.adjustSize()
         self._show_fold()
 
+    def show_volume(self, volume: int | None) -> None:
+        """The sound's volume, as read (None: no output to set)."""
+        if volume is not None:
+            self.volume.show_value(volume)
+        if self.volume.isHidden() != (volume is None):
+            self.volume.setHidden(volume is None)
+            self._show_fold()
+
     def set_brightness_shown(self, on: bool) -> None:
-        """Whether it has the sun button and its sliders (Settings)."""
+        """Whether it has the brightness sliders (Settings)."""
         self._brightness_on = on
         self._show_fold()
 
     def _show_fold(self) -> None:
-        """The sun button, with monitors to set and the sliders on - and, if they are down, as
-        many of them as there are now."""
-        shown = self._brightness_on and bool(self.brightness_rows)
+        """The sliders button, with the volume or a monitor to set - and, if they are down, as many
+        sliders as there are now."""
+        for row in self.brightness_rows:
+            row.setHidden(not self._brightness_on)
+        self._screens.activate()
+        self._sliders.adjustSize()
+        shown = not self.volume.isHidden() or (self._brightness_on and bool(self.brightness_rows))
         self.fold.setVisible(shown)
         if not shown:
             self._fold_to(False, animate=False)
@@ -855,7 +882,7 @@ class EdgePanel(QWidget):
         self.adjustSize()
 
     def _fold_to(self, open_: bool, animate: bool = True) -> None:
-        """Drop the brightness sliders down under their row, or fold them away - the panel growing
+        """Drop the sliders down under their button, or fold them away - the panel growing
         to hold them, or shrinking back."""
         self.screens_open = open_
         folding, self._folding = self._folding, None
@@ -1085,7 +1112,7 @@ class EdgePanel(QWidget):
             return
         if self.isVisible() and not self._leaving:
             near = self.frameGeometry().adjusted(-24, -24, 24, 24)
-            sliding = any(row.held for row in self.brightness_rows)     # dragged past its edge, a slider still holds it
+            sliding = any(row.held for row in self.brightness_rows + [self.volume])     # dragged past its edge, a slider still holds it
             if sliding or near.contains(point) or at_edge(point, self.edge) is not None:
                 self._left_at = None
             elif self._left_at is None:

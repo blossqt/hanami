@@ -292,7 +292,8 @@ class _Bridge(QObject):
     sensors_done = Signal(str, str)           # Hanami Sensors' setup: what it was asked, what went wrong ('' if nothing)
     monitors_found = Signal(object)           # the monitors with a brightness: [brightness.Monitor]
     hanami_staged = Signal(object, str)       # a newer Hanami, checked and waiting (its folder) - or what went wrong
-    sound_polled = Signal(str, object)        # where the sound goes now (an output's id), the microphone muted (_AudioPoll)
+    sound_polled = Signal(str, object, object)    # where the sound goes now (an output's id), the microphone
+                                                  # muted, the volume (_AudioPoll)
     version_read = Signal(str, object, str)   # the app, (its exe, when that was changed), the version stamped in it
     sensors_known = Signal(object, str)       # Hanami Sensors as it is (sensors.State), what went wrong ('' if nothing)
     leftovers_cleared = Signal()
@@ -302,13 +303,16 @@ NOT_ASKED = 'not asked'
 
 
 class _AudioPoll:
-    """Where the sound goes, and whether the microphone is muted, asked of Windows on a thread of
-    Hanami's own (COM's, for as long as Hanami runs): each takes it a few ms, which on the windows'
-    thread was a stutter in whatever was moving on screen, every 2 s. One question waits at most."""
+    """Where the sound goes - and, for the edge panel (mic), whether the microphone is muted and how
+    loud the sound is - asked of Windows on a thread of Hanami's own (COM's, for as long as Hanami
+    runs): each takes it a few ms, which on the windows' thread was a stutter in whatever was moving
+    on screen, every 2 s. One question waits at most. The volume is set there too, as the panel's
+    slider moves: only the newest of those waiting."""
 
     def __init__(self, answer):
         self._answer = answer
         self._asked: queue.Queue = queue.Queue(maxsize=1)
+        self._volume: int | None = None     # to be set next
         threading.Thread(target=self._run, name='hanami-audio', daemon=True).start()
 
     def ask(self, mic: bool) -> None:
@@ -317,21 +321,35 @@ class _AudioPoll:
         except queue.Full:
             pass                            # one is waiting already
 
+    def set_volume(self, percent: int) -> None:
+        self._volume = percent
+        self.ask(mic=False)
+
     def _run(self) -> None:
         while True:
             mic = self._asked.get()
             try:
+                volume, self._volume = self._volume, None
+                if volume is not None:
+                    try:
+                        audio.set_volume(volume)
+                    except OSError:
+                        traceback.print_exc()
                 try:
                     now = audio.current()
                 except OSError:
                     now = ''
-                muted = NOT_ASKED
+                muted = level = NOT_ASKED
                 if mic:
                     try:
                         muted = audio.mic_muted()
                     except OSError:
                         muted = None
-                self._answer(now, muted)
+                    try:
+                        level = audio.volume()
+                    except OSError:
+                        level = None
+                self._answer(now, muted, level)
             except Exception:  # noqa: BLE001 - this thread goes on, whatever one answer did
                 traceback.print_exc()
 
@@ -402,6 +420,7 @@ class Controller(QObject):
         self.monitors = brightness.Monitors(self._bridge.monitors_found.emit)
         self._monitors: list | None = None          # as last found - None until they are
         self.panel.brightness_set.connect(self.monitors.set)
+        self.panel.volume_set.connect(self._audio.set_volume)
         self.panel.set_brightness_shown(self.settings.panel_brightness)
         for change in (QApplication.instance().screenAdded, QApplication.instance().screenRemoved):
             change.connect(lambda _: self._look_for_monitors())
@@ -666,10 +685,12 @@ class Controller(QObject):
             now = ''
         self._show_sound(now)
 
-    def _sound_polled(self, now: str, muted) -> None:
+    def _sound_polled(self, now: str, muted, volume=NOT_ASKED) -> None:
         self._show_sound(now)
         if muted != NOT_ASKED and self.panel.isVisible():
             self.panel.show_mic(muted)
+        if volume != NOT_ASKED:
+            self.panel.show_volume(volume)
 
     def _show_sound(self, now: str) -> None:
         toggles = self._sound_toggles()
