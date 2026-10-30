@@ -9,6 +9,7 @@ Written once, here in Hanami, and copied into each app:
     suitetray.py    the Qt apps: suitelink, plus their own icon when Hanami isn't there
     suitetheme.py   the Qt apps, in ui\\: the pink, check boxes, colours, fonts and cards;
                     each app's ui\\theme.py imports it and adds its own colours
+    suitesettings.py the Qt apps, in ui\\: settings windows' pages, sections and switches
     suitelog.py     the Qt apps and Homework Hub: a windowed exe's prints, tracebacks and
                     native crashes, in a log
     suiteocr.py     Dropshift: Windows' text recognition
@@ -36,6 +37,7 @@ COPIES = {
     ROOT / 'app' / 'hanami' / 'suitelink.py': QT_APPS + [DOCUMENTS / 'homework-hub'],
     ROOT / 'app' / 'hanami' / 'suitetray.py': QT_APPS,
     ROOT / 'app' / 'hanami' / 'ui' / 'suitetheme.py': [app / 'ui' for app in QT_APPS],
+    ROOT / 'app' / 'hanami' / 'ui' / 'suitesettings.py': [app / 'ui' for app in QT_APPS],
     ROOT / 'app' / 'hanami' / 'suitelog.py': QT_APPS + [DOCUMENTS / 'homework-hub'],
     ROOT / 'app' / 'hanami' / 'suiteocr.py': [DOCUMENTS / 'Dropshift' / 'app' / 'dropshift'],
     ROOT / 'app' / 'hanami' / 'suiteweb.py': [DOCUMENTS / 'Dropshift' / 'app' / 'dropshift',

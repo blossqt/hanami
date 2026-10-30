@@ -8,214 +8,25 @@ The appearance is the whole suite's: what is chosen here is kept for every suite
 
 from __future__ import annotations
 
-import math
-
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal
-from PySide6.QtGui import (QColor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
-                           QRadialGradient)
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame,
-                               QGridLayout, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit, QPushButton, QScrollArea,
-                               QSlider, QStackedWidget, QVBoxLayout, QWidget)
+                               QGridLayout, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit, QPushButton,
+                               QSlider, QVBoxLayout, QWidget)
 
 from .. import __version__
 from ..catalog import SUITE
-from . import icons, suitetheme, theme
+from . import icons, suitesettings, suitetheme, theme
+from .suitesettings import glyph_font  # noqa: F401 - the icon font, for the launcher, panel and sound pop-up
 
 SOURCE = 'https://github.com/blossqt/hanami'
 
 
-def glyph_font(point_size: float) -> QFont:
-    """Windows 11's icon font (Windows 10's, if that is all there is)."""
-    f = QFont('Segoe Fluent Icons')
-    if not f.exactMatch():
-        f = QFont('Segoe MDL2 Assets')
-    f.setPointSizeF(point_size)
-    return f
-
-
-def _label(text: str, size: float = 9.5, weight=QFont.Normal, role: str = '', wrap: bool = False) -> QLabel:
-    label = QLabel(text)
-    label.setFont(theme.font(size, weight))
-    if role:
-        label.setProperty('role', role)
-    label.setWordWrap(wrap)
-    return label
-
-
-def _section(title: str) -> tuple[QFrame, QVBoxLayout]:
-    """A panel on a page, under its own heading."""
-    frame = QFrame()
-    frame.setObjectName('section')
-    layout = QVBoxLayout(frame)
-    layout.setContentsMargins(18, 14, 18, 16)
-    layout.setSpacing(8)
-    if title:                           # none for a page's first, when it would say the page's name again
-        layout.addWidget(_label(title, 10.5, QFont.DemiBold))
-    return frame, layout
-
-
-def _switch(text: str, about: str, on: bool) -> tuple[QWidget, QCheckBox]:
-    """A setting: a check box (a switch, in the liquid look), and a line about it below."""
-    box = QCheckBox(text)
-    box.setChecked(on)
-    box.setCursor(Qt.PointingHandCursor)
-    holder = QWidget()
-    layout = QVBoxLayout(holder)
-    layout.setContentsMargins(0, 2, 0, 2)
-    layout.setSpacing(1)
-    layout.addWidget(box)
-    if about:
-        line = _label(about, 8.5, role='dim', wrap=True)
-        line.setObjectName('about')
-        _indent(line)
-        layout.addWidget(line)
-    return holder, box
-
-
-def _indent(line: QLabel) -> None:
-    """A line about a setting starts under its words, past the box (or switch) beside them."""
-    liquid = theme.look() == 'liquid' and theme.glass_on()
-    line.setContentsMargins((theme.SuiteStyle.SWITCH[0] if liquid else theme.SuiteStyle.SIZE) + 8, 0, 0, 0)
-
-
-class _Nav(QWidget):
-    """The pages down the left: a pill slides to the one chosen - springing into place, and
-    stretching as it goes, in the liquid look."""
-
-    chosen = Signal(int)
-    ROW = 40
-
-    def __init__(self, items: list[tuple[str, str]]):
-        super().__init__()
-        self._items = items
-        self._current = 0
-        self._hover = -1
-        self._at = 0.0                  # where the pill is, in rows
-        self._moving = 0.0              # how far through a move it is, for its stretch
-        self._slide = None
-        self.setFixedWidth(196)
-        self.setMouseTracking(True)
-        self.setFocusPolicy(Qt.StrongFocus)
-        self.setCursor(Qt.PointingHandCursor)
-
-    def sizeHint(self) -> QSize:
-        return QSize(196, self.ROW * len(self._items) + 16)
-
-    def current(self) -> int:
-        return self._current
-
-    def choose(self, index: int) -> None:
-        if not 0 <= index < len(self._items) or index == self._current:
-            return
-        start = self._at
-        self._current = index
-        self.chosen.emit(index)
-        theme.stop_animation(self._slide)
-        if not theme.motion_on():
-            self._at = float(index)
-            self.update()
-            return
-        slide = self._slide = QVariantAnimation(self)
-        liquid = theme.look() == 'liquid' and theme.glass_on()
-        curve = QEasingCurve(QEasingCurve.OutBack if liquid else QEasingCurve.OutCubic)
-        if liquid:
-            curve.setOvershoot(1.1)
-        slide.setEasingCurve(curve)
-        slide.setDuration(360 if liquid else 220)
-        slide.setStartValue(start)
-        slide.setEndValue(float(index))
-
-        def step(value):
-            self._at = float(value)
-            span = abs(index - start) or 1
-            self._moving = min(1.0, max(0.0, abs(self._at - start) / span))
-            self.update()
-
-        def done():
-            self._moving = 0.0
-            self.update()
-        slide.valueChanged.connect(step)
-        slide.finished.connect(done)
-        theme.animate(slide)
-
-    def _row_at(self, y: float) -> int:
-        index = int((y - 8) // self.ROW)
-        return index if 0 <= index < len(self._items) else -1
-
-    def mousePressEvent(self, event):
-        index = self._row_at(event.position().y())
-        if index >= 0:
-            self.choose(index)
-
-    def mouseMoveEvent(self, event):
-        index = self._row_at(event.position().y())
-        if index != self._hover:
-            self._hover = index
-            self.update()
-
-    def leaveEvent(self, event):
-        self._hover = -1
-        self.update()
-
-    def keyPressEvent(self, event):
-        if event.key() in (Qt.Key_Down, Qt.Key_Right):
-            self.choose(self._current + 1)
-        elif event.key() in (Qt.Key_Up, Qt.Key_Left):
-            self.choose(self._current - 1)
-        else:
-            super().keyPressEvent(event)
-
-    def paintEvent(self, event):
-        c = theme.colors()
-        dark = theme.is_dark()
-        liquid = theme.look() == 'liquid' and theme.glass_on()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        width = self.width() - 16
-        if 0 <= self._hover != self._current:
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(255, 255, 255, 14) if dark else QColor(0, 0, 0, 10))
-            p.drawRoundedRect(QRectF(8, 8 + self._hover * self.ROW + 2, width, self.ROW - 4), 8, 8)
-        stretch = 6 * math.sin(math.pi * self._moving) if liquid else 0.0
-        pill = QRectF(8, 8 + self._at * self.ROW + 2 - stretch / 2, width, self.ROW - 4 + stretch)
-        if liquid:
-            round_ = pill.height() / 2
-            body = QLinearGradient(pill.topLeft(), pill.bottomLeft())
-            body.setColorAt(0, QColor(255, 255, 255, 52 if dark else 235))
-            body.setColorAt(1, QColor(255, 255, 255, 18 if dark else 140))
-            p.setPen(Qt.NoPen)
-            p.setBrush(body)
-            p.drawRoundedRect(pill, round_, round_)
-            suitetheme._edge_light(p, pill.adjusted(0.5, 0.5, -0.5, -0.5), round_, 120, 150 if dark else 255, 1.1)
-            if not dark:
-                p.setPen(QPen(QColor(0, 0, 0, 22), 1))
-                p.setBrush(Qt.NoBrush)
-                p.drawRoundedRect(pill, round_, round_)
-        else:
-            p.setPen(Qt.NoPen)
-            p.setBrush(c.chip)
-            p.drawRoundedRect(pill, 8, 8)
-            bar = QRectF(pill.left() + 1, pill.center().y() - 8, 3, 16)
-            p.setBrush(QColor(theme.ink()))
-            p.drawRoundedRect(bar, 1.5, 1.5)
-        for index, (mark, title) in enumerate(self._items):
-            row = QRectF(8, 8 + index * self.ROW, width, self.ROW)
-            selected = index == self._current
-            p.setPen(QColor(theme.ink()) if selected else c.dim)
-            p.setFont(glyph_font(11))
-            p.drawText(QRectF(row.left() + 14, row.top(), 24, row.height()), Qt.AlignCenter, mark)
-            p.setPen(c.text)
-            p.setFont(theme.font(9.5, QFont.DemiBold if selected else QFont.Normal))
-            p.drawText(QRectF(row.left() + 46, row.top(), row.width() - 50, row.height()),
-                       Qt.AlignVCenter | Qt.AlignLeft, title)
-        if self.hasFocus() and self._current >= 0:
-            p.setPen(QPen(QColor(theme.ink()), 1, Qt.DotLine))
-            p.setBrush(Qt.NoBrush)
-            p.drawRoundedRect(pill.adjusted(-2, -2, 2, 2), 10, 10)
-        p.end()
+_label, _section, _switch, _indent, _Nav = (suitesettings.label, suitesettings.section, suitesettings.switch,
+                                            suitesettings.indent, suitesettings.Nav)
 
 
 class _LookTile(QAbstractButton):
@@ -367,39 +178,16 @@ class SettingsWindow(QWidget):
         super().__init__()
         self.setWindowTitle('Hanami settings')
         self.setWindowIcon(icons.app_icon())
-        self.setObjectName('settings')
-        self.setMinimumSize(800, 560)
         theme.frost(self, backdrop=theme.BACKDROP)
-        outer = QHBoxLayout(self)
-        outer.setContentsMargins(12, 16, 20, 16)
-        outer.setSpacing(12)
-        side = QVBoxLayout()
-        side.setSpacing(10)
-        top = QHBoxLayout()
-        top.setContentsMargins(14, 0, 0, 0)
-        top.setSpacing(10)
-        logo = QLabel()
-        logo.setPixmap(icons.render_app_icon(28))
-        top.addWidget(logo)
-        top.addWidget(_label('Settings', 13, QFont.DemiBold), 1)
-        side.addLayout(top)
-        self.nav = _Nav(self.PAGES)
-        side.addWidget(self.nav)
-        side.addStretch(1)
-        outer.addLayout(side)
-        self.pages = QStackedWidget()
-        self.pages.addWidget(self._general(start_with, starts_with_windows))
-        self.pages.addWidget(self._scrolled(self._edge_panel(panel_edge, tab, list(pinned or []), panel_pages,
-                                                                    brightness_on, panel_buttons)))
-        self.pages.addWidget(self._appearance())
-        self.pages.addWidget(self._games())
-        self.pages.addWidget(self._sound(*sound))
-        self.pages.addWidget(self._screen_text(*text))
-        self.pages.addWidget(self._updates(*updates))
-        self.pages.addWidget(self._about())
-        self.nav.chosen.connect(self.pages.setCurrentIndex)
-        outer.addWidget(self.pages, 1)
-        theme.restyle(self, self._style)
+        frame = suitesettings.SettingsFrame(self, icons.render_app_icon(28))
+        self.nav, self.pages = frame.nav, frame.pages
+        made = [self._general(start_with, starts_with_windows),
+                self._scrolled(self._edge_panel(panel_edge, tab, list(pinned or []), panel_pages, brightness_on,
+                                                panel_buttons)),
+                self._appearance(), self._games(), self._sound(*sound), self._screen_text(*text),
+                self._updates(*updates), self._about()]
+        for (mark, title), widget in zip(self.PAGES, made):
+            frame.add_widget(mark, title, widget)
         theme.on_restyle(self._appearance_changed)
 
     def open_page(self, name: str) -> None:
@@ -409,16 +197,8 @@ class SettingsWindow(QWidget):
 
     # ------------------------------------------------------------------ pages
 
-    @staticmethod
-    def _page(title: str, about: str) -> tuple[QWidget, QVBoxLayout]:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(12)
-        layout.addWidget(_label(title, 17, QFont.DemiBold))
-        if about:
-            layout.addWidget(_label(about, 9, role='dim', wrap=True))
-        return page, layout
+    _page = staticmethod(suitesettings.page)
+    _scrolled = staticmethod(suitesettings.scrolled)
 
     def _general(self, start_with: list[str], starts_with_windows: bool) -> QWidget:
         page, layout = self._page('General', '')
@@ -450,18 +230,6 @@ class SettingsWindow(QWidget):
         layout.addWidget(frame)
         layout.addStretch(1)
         return page
-
-    @staticmethod
-    def _scrolled(page: QWidget) -> QScrollArea:
-        """A page taller than the window, in a scroll area of glass."""
-        page.setObjectName('scrolled')
-        area = QScrollArea()
-        area.setObjectName('scrolled')
-        area.setWidget(page)
-        area.setWidgetResizable(True)
-        area.setFrameShape(QFrame.NoFrame)
-        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        return area
 
     def _edge_panel(self, panel_edge: str, tab: tuple[int, int, int] | None, pinned: list,
                     panel_pages: list[str] | None = None, brightness_on: bool = True,
@@ -1069,19 +837,3 @@ class SettingsWindow(QWidget):
             self.nav.update()
         except RuntimeError:                                # the window has gone
             pass
-
-    def _style(self) -> str:
-        c = theme.colors()
-        return theme.card_style() + theme.panel_css('QFrame#section', 12) + f"""
-            QWidget#settings {{ background: {theme.css(c.card)}; }}
-            QStackedWidget, QStackedWidget > QWidget {{ background: transparent; }}
-            QScrollArea#scrolled, QScrollArea#scrolled > QWidget, QWidget#scrolled {{ background: transparent; }}
-            QSlider {{ min-height: 22px; background: transparent; }}
-            QSlider::groove:horizontal {{ height: 4px; border-radius: 2px; background: {theme.css(c.border)}; }}
-            QSlider::sub-page:horizontal {{ height: 4px; border-radius: 2px; background: {theme.ACCENT}; }}
-            QSlider::handle:horizontal {{ width: 16px; height: 16px; margin: -6px 0; border-radius: 8px;
-                                          background: {theme.ACCENT}; border: 1px solid {theme.ink()}; }}
-            QSlider::handle:horizontal:hover {{ background: {theme.ACCENT_HOVER}; }}
-            QSlider::sub-page:horizontal:disabled, QSlider::handle:horizontal:disabled {{
-                background: {theme.css(c.border)}; border-color: {theme.css(c.border)}; }}
-        """
