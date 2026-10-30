@@ -41,7 +41,7 @@ from .stats import Sampler
 from .ui import icons, pins, theme
 from .ui.launcher import CardState, LauncherWindow, placeholder_icon
 from .ui.screentext import ScreenText
-from .ui.panel import PAGES, TAB_LIMITS, TAB_LOOK, EdgePanel
+from .ui.panel import BUTTONS, PAGES, TAB_LIMITS, TAB_LOOK, EdgePanel
 from .ui.settings import SettingsWindow, glyph_font
 from .ui.sound import HEADPHONES, SPEAKER, SoundPopup, sounds_like_headphones
 
@@ -255,6 +255,19 @@ class Settings:
     def panel_brightness(self, on: bool) -> None:
         self._store.setValue('panel/brightness', 'true' if on else 'false')
 
+    @property
+    def panel_buttons(self) -> list[str]:
+        """The edge panel's buttons (of BUTTONS, in that order): all of them until some are turned off."""
+        try:
+            names = json.loads(str(self._store.value('panel/buttons', json.dumps(list(BUTTONS)))))
+        except ValueError:
+            names = list(BUTTONS)
+        return [name for name in BUTTONS if isinstance(names, list) and name in names]
+
+    @panel_buttons.setter
+    def panel_buttons(self, names: list[str]) -> None:
+        self._store.setValue('panel/buttons', json.dumps([name for name in BUTTONS if name in names]))
+
     def set_sound(self, on: bool, hotkey: str) -> None:
         self._store.setValue('sound/hotkey_on', 'true' if on else 'false')
         self._store.setValue('sound/hotkey', hotkey)
@@ -417,6 +430,7 @@ class Controller(QObject):
         self.panel.place = self.settings.panel_place
         self.panel.set_tab(*self.settings.panel_tab)
         self.panel.set_pages(self.settings.panel_pages)
+        self.panel.set_buttons(self.settings.panel_buttons)
         self.monitors = brightness.Monitors(self._bridge.monitors_found.emit)
         self._monitors: list | None = None          # as last found - None until they are
         self.panel.brightness_set.connect(self.monitors.set)
@@ -804,6 +818,10 @@ class Controller(QObject):
     def _pages_changed(self, names: list) -> None:
         self.settings.panel_pages = names
         self.panel.set_pages(names)
+
+    def _buttons_changed(self, names: list) -> None:
+        self.settings.panel_buttons = names
+        self.panel.set_buttons(names)
 
     def _pins_changed(self, pinned: list) -> None:
         self.settings.pinned = pinned
@@ -1408,7 +1426,7 @@ class Controller(QObject):
                                                    s.update_hanami),
                                                   (s.sound_hotkey_on, s.sound_hotkey), s.panel_edge, s.panel_tab,
                                                   s.pinned, s.panel_pages, s.panel_brightness,
-                                                  (s.text_hotkey_on, s.text_hotkey))
+                                                  (s.text_hotkey_on, s.text_hotkey), s.panel_buttons)
             self.settings_window.startup_changed.connect(self._startup_changed)
             self.settings_window.sound_changed.connect(self._sound_changed)
             self.settings_window.text_changed.connect(self._text_changed)
@@ -1419,6 +1437,7 @@ class Controller(QObject):
             self.settings_window.pages_changed.connect(self._pages_changed)
             self.settings_window.sensors_asked.connect(self._sensors_asked)
             self.settings_window.brightness_changed.connect(self._brightness_changed)
+            self.settings_window.buttons_changed.connect(self._buttons_changed)
             self.settings_window.updates_changed.connect(self._updates_changed)
             self.settings_window.hanami_updates_changed.connect(self._hanami_updates_changed)
             self.settings_window.check_now.connect(self.check_releases)

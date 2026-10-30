@@ -351,6 +351,7 @@ class SettingsWindow(QWidget):
     pages_changed = Signal(list)                    # the panel's pages: names from panel.PAGES, in order
     sensors_asked = Signal(str)                     # Hanami Sensors: '--install' (or update) or '--uninstall'
     brightness_changed = Signal(bool)               # the panel's brightness sliders: on or off
+    buttons_changed = Signal(list)                  # the panel's buttons: names from panel.BUTTONS
     check_now = Signal()
     show_page = Signal(str)
     open_url = Signal(str)
@@ -362,7 +363,7 @@ class SettingsWindow(QWidget):
                  sound: tuple[bool, str] = (True, ''), panel_edge: str = 'right',
                  tab: tuple[int, int, int] | None = None, pinned: list | None = None,
                  panel_pages: list[str] | None = None, brightness_on: bool = True,
-                 text: tuple[bool, str] = (True, '')):
+                 text: tuple[bool, str] = (True, ''), panel_buttons: list[str] | None = None):
         super().__init__()
         self.setWindowTitle('Hanami settings')
         self.setWindowIcon(icons.app_icon())
@@ -389,7 +390,7 @@ class SettingsWindow(QWidget):
         self.pages = QStackedWidget()
         self.pages.addWidget(self._general(start_with, starts_with_windows))
         self.pages.addWidget(self._scrolled(self._edge_panel(panel_edge, tab, list(pinned or []), panel_pages,
-                                                                    brightness_on)))
+                                                                    brightness_on, panel_buttons)))
         self.pages.addWidget(self._appearance())
         self.pages.addWidget(self._games())
         self.pages.addWidget(self._sound(*sound))
@@ -463,8 +464,9 @@ class SettingsWindow(QWidget):
         return area
 
     def _edge_panel(self, panel_edge: str, tab: tuple[int, int, int] | None, pinned: list,
-                    panel_pages: list[str] | None = None, brightness_on: bool = True) -> QWidget:
-        from .panel import PAGES, TAB_LIMITS, TAB_LOOK          # (the panel's sound switch is drawn from here)
+                    panel_pages: list[str] | None = None, brightness_on: bool = True,
+                    panel_buttons: list[str] | None = None) -> QWidget:
+        from .panel import BUTTONS, PAGES, TAB_LIMITS, TAB_LOOK     # (the panel's sound switch is drawn from here)
         page, layout = self._page('Edge panel', '')
         frame, box = _section('')
         holder, self.panel_on = _switch('Slide out a panel at the edge of the screen',
@@ -501,6 +503,18 @@ class SettingsWindow(QWidget):
             check.toggled.connect(self._pages_edited)
             box.addWidget(holder)
             self.page_switches[name] = check
+        layout.addWidget(frame)
+        frame, box = _section('Buttons')
+        shown = list(BUTTONS) if panel_buttons is None else panel_buttons
+        self.button_switches: dict[str, QCheckBox] = {}
+        for name, title, about in (
+                ('levels', 'Volume and brightness', ''),
+                ('output', 'Sound output', 'Switches between the speakers and headphones chosen under Sound.'),
+                ('mic', 'Microphone', '')):
+            holder, check = _switch(title, about, name in shown)
+            check.toggled.connect(self._buttons_edited)
+            box.addWidget(holder)
+            self.button_switches[name] = check
         layout.addWidget(frame)
         frame, box = _section('Brightness')
         holder, self.brightness_switch = _switch('Monitor brightness', 'A slider for each monitor, under the volume in the panel. '
@@ -862,8 +876,9 @@ class SettingsWindow(QWidget):
 
     def _panel_edited(self, *_, emit: bool = True) -> None:
         on = self.panel_on.isChecked()
-        for button in [*self.edge_buttons.values(), *self.tab_sliders.values(), self.brightness_switch]:
+        for button in [*self.edge_buttons.values(), *self.tab_sliders.values(), *self.button_switches.values()]:
             button.setEnabled(on)
+        self._buttons_edited(emit=False)
         if hasattr(self, 'pin_note'):
             self._show_pinned(self.pin_note.text() if self.pin_note.isVisible() else '')
         if hasattr(self, 'page_switches'):
@@ -918,6 +933,14 @@ class SettingsWindow(QWidget):
             check.setEnabled(on and not (check.isChecked() and len(names) == 1))
         if emit and names:
             self.pages_changed.emit(names)
+
+    def _buttons_edited(self, *_, emit: bool = True) -> None:
+        """The panel's buttons. The brightness sliders are in the volume and brightness drop-down,
+        so they have nothing to choose without it."""
+        names = [name for name, check in self.button_switches.items() if check.isChecked()]
+        self.brightness_switch.setEnabled(self.panel_on.isChecked() and 'levels' in names)
+        if emit:
+            self.buttons_changed.emit(names)
 
     def _tab_edited(self) -> None:
         s = self.tab_sliders

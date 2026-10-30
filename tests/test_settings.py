@@ -930,6 +930,39 @@ class PanelTests(_Controlled):
         self.assertFalse(self.panel.fold.isVisibleTo(self.panel), 'no output any more: gone')
         self.controller._brightness_changed(True)
 
+    def test_buttons(self):
+        from hanami.ui.panel import INNER
+        p = self.panel
+        self._open()
+        self.controller._sound_polled('', None, 53)
+        shown =lambda: [w.isVisibleTo(p) for w in (p.fold, p.sound, p.mic)]
+        self.assertEqual(shown(), [True, True, True], 'all of them at first')
+        tall = p.height()
+        window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY), 'right')
+        window.buttons_changed.connect(self.controller._buttons_changed)
+        try:
+            window.button_switches['levels'].setChecked(False)
+            self.assertEqual(shown(), [False, True, True])
+            self.assertLess(p.height(), tall, 'the panel shrinks to what it holds')
+            self.assertFalse(window.brightness_switch.isEnabled(), 'brightness is in the drop-down')
+            window.button_switches['mic'].setChecked(False)
+            self.assertEqual(shown(), [False, True, False])
+            self.assertEqual(p.sound.width(), INNER, 'the sound switch takes the mic’s room')
+            window.button_switches['output'].setChecked(False)
+            self.assertEqual(shown(), [False, False, False])
+            self.assertEqual(self.controller.settings.panel_buttons, [], 'kept')
+            window.button_switches['mic'].setChecked(True)
+            window.button_switches['levels'].setChecked(True)
+            self.assertEqual(shown(), [True, False, True])
+            self.assertTrue(window.brightness_switch.isEnabled())
+            self.assertEqual(self.controller.settings.panel_buttons, ['levels', 'mic'], 'kept, in order')
+        finally:
+            window.close()
+            self.controller._buttons_changed(['levels', 'output', 'mic'])
+            self.controller._sound_polled('', None, None)
+        self.assertEqual(shown(), [False, True, True])
+        self.assertEqual(p.sound.width(), INNER - p.mic.width() - 6, 'back beside the mic')
+
     def test_brightness(self):
         from PySide6.QtCore import QPoint, Qt
         from PySide6.QtTest import QTest

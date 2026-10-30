@@ -44,6 +44,7 @@ INNER = WIDTH - 2 * 12  # within its margins
 PIN_ICON = 40
 PIN_TILE = (INNER - 4) // 2
 PAGES = ('apps', 'pinned', 'stats')    # the Hanami suite, shortcuts, stats: those chosen are shown, in this order
+BUTTONS = ('levels', 'output', 'mic')   # the volume and brightness drop-down, the sound switch, the mic: those chosen are shown
 STATS_EVERY = 1000      # ms between samples, while the stats page is in sight
 STATS_QUICK = 250, 2.0  # ms between samples, for the first s of it: so the processor's temperature
                         # shows as soon as Hanami Sensors has it, when it has just been started
@@ -761,6 +762,7 @@ class EdgePanel(QWidget):
         self._screens.addWidget(self.volume)
         self.brightness_rows: list[_Level] = []
         self._brightness_on = True
+        self._buttons_on = set(BUTTONS)
         self.screens_open = False
         self._folding: QVariantAnimation | None = None
         layout.addWidget(self.screens)
@@ -866,6 +868,15 @@ class EdgePanel(QWidget):
         self._brightness_on = on
         self._show_fold()
 
+    def set_buttons(self, names: list[str]) -> None:
+        """Which of its buttons it has (of BUTTONS), as chosen in Settings. The sound switch takes
+        the mic's room when the mic is off."""
+        self._buttons_on = set(names)
+        self.sound.setVisible('output' in names)
+        self.mic.setVisible('mic' in names)
+        self.sound.setFixedWidth(INNER if 'mic' not in names else INNER - MicButton.SIZE - 6)
+        self._show_fold()
+
     def _show_fold(self) -> None:
         """The sliders button, with the volume or a monitor to set - and, if they are down, as many
         sliders as there are now."""
@@ -873,7 +884,8 @@ class EdgePanel(QWidget):
             row.setHidden(not self._brightness_on)
         self._screens.activate()
         self._sliders.adjustSize()
-        shown = not self.volume.isHidden() or (self._brightness_on and bool(self.brightness_rows))
+        shown = 'levels' in self._buttons_on and (
+            not self.volume.isHidden() or (self._brightness_on and bool(self.brightness_rows)))
         self.fold.setVisible(shown)
         if not shown:
             self._fold_to(False, animate=False)
