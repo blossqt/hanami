@@ -512,6 +512,95 @@ class MotionTests(unittest.TestCase):
         finally:
             suitetheme._frame_rate()
 
+    def test_the_wheel_glides(self):
+        from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QWheelEvent
+        from PySide6.QtWidgets import QListWidget, QScrollArea
+        suitetheme.install(app) if suitetheme._wheels_filter is None else None
+        area = QScrollArea()
+        inside = QWidget()
+        inside.setFixedSize(300, 3000)
+        area.setWidget(inside)
+        area.resize(320, 300)
+        area.show()
+        app.processEvents()
+        bar = area.verticalScrollBar()
+
+        def wheel(widget, y=-120, pixels=QPoint(0, 0), modifiers=Qt.NoModifier):
+            event = QWheelEvent(QPointF(20, 20), QPointF(20, 20), pixels, QPoint(0, y), Qt.NoButton,
+                                modifiers, Qt.NoScrollPhase, False)
+            QApplication.sendEvent(widget, event)
+            return event
+        step = QApplication.wheelScrollLines() * bar.singleStep()
+        wheel(area.viewport())
+        self.assertLess(bar.value(), step, 'not there at once')
+        _wait(suitetheme.SCROLL_MS // 3)
+        self.assertTrue(0 < bar.value() < step, 'on its way')
+        wheel(area.viewport())                      # a second notch, while the first glides
+        _wait(suitetheme.SCROLL_MS + 120)
+        self.assertEqual(bar.value(), 2 * step, 'both notches, as Qt goes: no further, no less')
+        bar.setValue(0)
+        wheel(area.viewport(), pixels=QPoint(0, -40), y=-40)
+        self.assertGreater(bar.value(), 0, "a touchpad's own smooth scrolling: Qt's, at once")
+        bar.setValue(0)
+        wheel(area.viewport(), y=120)
+        _wait(60)
+        self.assertEqual(bar.value(), 0, 'at the top, up: nothing, and the wheel goes on to what holds it')
+        wheel(area.viewport())
+        _wait(40)
+        bar.setValue(1000)                          # moved meanwhile (a jump to an item, say)
+        _wait(suitetheme.SCROLL_MS)
+        self.assertEqual(bar.value(), 1000, 'the glide gives way')
+        rows = QListWidget()
+        rows.addItems([f'Row {n}' for n in range(200)])
+        rows.resize(200, 200)
+        rows.show()
+        app.processEvents()
+        wheel(rows.viewport())
+        _wait(suitetheme.SCROLL_MS + 120)
+        self.assertEqual(rows.verticalScrollMode(), rows.ScrollMode.ScrollPerPixel, 'a list by the pixel')
+        self.assertEqual(rows.verticalScrollBar().value(), QApplication.wheelScrollLines() * rows.sizeHintForRow(0),
+                         'three rows a notch, as before - from the first notch on')
+        with mock.patch.object(suitetheme, 'motion_on', lambda: False):
+            bar.setValue(0)
+            wheel(area.viewport())
+            self.assertEqual(bar.value(), step, 'animations off: at once, as Qt does it')
+        area.close()
+        rows.close()
+
+    def test_a_button_brightens_under_the_pointer_in_frosted(self):
+        from PySide6.QtCore import QEvent, QPointF
+        from PySide6.QtGui import QEnterEvent
+        with mock.patch.object(suitetheme, '_liquid_look', lambda: False),                 mock.patch.object(suitetheme, 'motion_on', lambda: True):
+            window = QWidget()
+            button = QPushButton('Open', window)
+            button.resize(100, 32)
+            suitetheme.frost(window)
+            window.show()
+            app.processEvents()
+            plain = button.grab().toImage()
+            from PySide6.QtGui import QHoverEvent
+            QApplication.sendEvent(button, QHoverEvent(QEvent.HoverEnter, QPointF(50, 16), QPointF(50, 16), QPointF(-1, -1)))
+            state = getattr(button, suitetheme._LIGHT)
+            self.assertLess(state['hover'], 0.5, 'not at once')
+            _wait(250)
+            self.assertAlmostEqual(state['hover'], 1.0, places=2)
+            self.assertNotEqual(button.grab().toImage(), plain, 'drawn lighter')
+            QApplication.sendEvent(button, QHoverEvent(QEvent.HoverLeave, QPointF(-1, -1), QPointF(-1, -1), QPointF(50, 16)))
+            _wait(400)
+            self.assertLess(state['hover'], 0.01, 'and back')
+            window.close()
+
+    def test_menus_and_lists_slide_open_with_animations_on(self):
+        with mock.patch.object(suitetheme, 'motion_on', lambda: True):
+            suitetheme._ui_effects()
+            self.assertTrue(QApplication.isEffectEnabled(Qt.UI_AnimateCombo))
+            self.assertTrue(QApplication.isEffectEnabled(Qt.UI_FadeMenu))
+        with mock.patch.object(suitetheme, 'motion_on', lambda: False):
+            suitetheme._ui_effects()
+            self.assertFalse(QApplication.isEffectEnabled(Qt.UI_AnimateMenu))
+        suitetheme._ui_effects()
+
     def test_a_windows_parts_rise_into_place_one_after_another(self):
         window = QWidget()
         layout = QVBoxLayout(window)
