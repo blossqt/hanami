@@ -47,7 +47,7 @@ def placeholder_icon(name: str, size: int) -> QPixmap:
 class CardState:
     exe: Path | None = None         # where the app is, if it is on this PC
     running: bool = False
-    in_tray: bool = False           # running and in the blossom
+    in_tray: bool = False           # running, its menu in Hanami's tray icon
     version: str = ''               # of the copy on this PC, when known
     installed: bool = False         # installed by Hanami, so Hanami can update or remove it
     latest: str = ''                # the newest release, when known
@@ -77,13 +77,13 @@ class AppCard(QFrame):
         self.app = app
         self.setObjectName('card')
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 14, 12, 14)
-        layout.setSpacing(14)
+        layout.setContentsMargins(16, 16, 12, 16)
+        layout.setSpacing(16)
         self.icon = QLabel()
         self.icon.setFixedSize(44, 44)
         layout.addWidget(self.icon, 0, Qt.AlignTop)
         text = QVBoxLayout()
-        text.setSpacing(3)
+        text.setSpacing(4)
         heading = QHBoxLayout()
         heading.setSpacing(8)
         heading.addWidget(_label(app.name, 11.5, QFont.DemiBold))
@@ -113,8 +113,7 @@ class AppCard(QFrame):
         text.addWidget(self.progress)
         buttons = QHBoxLayout()
         buttons.setSpacing(6)
-        self.open = QPushButton('Open')
-        self.open.setProperty('role', 'primary')
+        self.open = QPushButton('Open')             # pink only as Install: Open and Start are routine
         self.open.clicked.connect(self._primary)
         self.update = QPushButton('Update')
         self.update.setProperty('role', 'primary')
@@ -127,7 +126,7 @@ class AppCard(QFrame):
             button.setCursor(Qt.PointingHandCursor)
             buttons.addWidget(button)
         buttons.addStretch(1)
-        text.addSpacing(4)
+        text.addSpacing(8)
         text.addLayout(buttons)
         layout.addLayout(text, 1)
         self._exe = None
@@ -168,7 +167,7 @@ class AppCard(QFrame):
         self._shown = shown
         self._state = s
         self._show_icon(s.exe)
-        self.version.setText(s.version)
+        self.version.setText(s.version or (s.latest if s.exe is None else ''))     # not here yet: the newest
         c = theme.colors()
         dim, rose = c.dim.name(), theme.ink()
         if s.busy:
@@ -177,10 +176,9 @@ class AppCard(QFrame):
                 words = f'Downloading {s.latest}…  {s.done / 1e6:.0f} of {s.total / 1e6:.0f} MB'
             line = f'<span style="color:{dim}">{words}</span>'
         elif s.exe is None:
-            available = f' · {s.latest} available' if s.latest else ''
-            line = f'<span style="color:{dim}">○</span>&nbsp; Not installed{available}'
+            line = f'<span style="color:{dim}">○</span>&nbsp; Not installed'
         elif s.running:
-            line = '<span style="color:#2f9e44">●</span>&nbsp; Running' + (' · in the blossom' if s.in_tray else '')
+            line = '<span style="color:#2f9e44">●</span>&nbsp; Running' + (' · in the tray' if s.in_tray else '')
         else:
             line = f'<span style="color:{dim}">○</span>&nbsp; Not running'
         if s.update and not s.busy:
@@ -198,6 +196,11 @@ class AppCard(QFrame):
                 self.progress.setValue(int(1000 * s.done / s.total))
         self.open.setText('Install' if s.exe is None else 'Open' if s.running
                           else 'Starting…' if s.starting else 'Start')
+        primary = 'primary' if s.exe is None else ''
+        if self.open.property('role') != primary:
+            self.open.setProperty('role', primary)
+            self.open.style().unpolish(self.open)
+            self.open.style().polish(self.open)
         self.open.setEnabled(not s.starting)
         self.open.setVisible(not busy)
         self.update.setText(f'Update to {s.latest}')
@@ -236,7 +239,7 @@ class LauncherWindow(QWidget):
         self.setObjectName('launcher')
         theme.frost(self, backdrop=theme.BACKDROP)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 18)
+        layout.setContentsMargins(24, 24, 24, 20)
         layout.setSpacing(16)
 
         top = QHBoxLayout()

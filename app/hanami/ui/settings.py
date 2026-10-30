@@ -52,7 +52,8 @@ def _section(title: str) -> tuple[QFrame, QVBoxLayout]:
     layout = QVBoxLayout(frame)
     layout.setContentsMargins(18, 14, 18, 16)
     layout.setSpacing(8)
-    layout.addWidget(_label(title, 10.5, QFont.DemiBold))
+    if title:                           # none for a page's first, when it would say the page's name again
+        layout.addWidget(_label(title, 10.5, QFont.DemiBold))
     return frame, layout
 
 
@@ -465,11 +466,10 @@ class SettingsWindow(QWidget):
                     panel_pages: list[str] | None = None, brightness_on: bool = True) -> QWidget:
         from .panel import PAGES, TAB_LIMITS, TAB_LOOK          # (the panel's sound switch is drawn from here)
         page, layout = self._page('Edge panel', '')
-        frame, box = _section('Edge panel')
+        frame, box = _section('')
         holder, self.panel_on = _switch('Slide out a panel at the edge of the screen',
-                                        'A little tab at the edge shows where it is: rest the pointer on it, or click '
-                                        'it. Drag the tab, or the panel’s handle, to move it. Scroll on the panel to '
-                                        'turn its pages. It keeps away from games and anything full screen.',
+                                        'Rest the pointer on the tab at the edge, or click it. It stays shut over '
+                                        'games and anything full screen.',
                                         bool(panel_edge))
         self.panel_on.toggled.connect(self._panel_edited)
         box.addWidget(holder)
@@ -503,7 +503,7 @@ class SettingsWindow(QWidget):
             self.page_switches[name] = check
         layout.addWidget(frame)
         frame, box = _section('Brightness')
-        holder, self.brightness_switch = _switch('Monitor brightness', 'A slider for each monitor, under the pages. '
+        holder, self.brightness_switch = _switch('Monitor brightness', 'A slider for each monitor, under the volume in the panel. '
                                                  'A monitor has one only with DDC/CI on in its own menu.',
                                                  brightness_on)
         self.brightness_switch.toggled.connect(self.brightness_changed)
