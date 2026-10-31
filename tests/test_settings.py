@@ -640,10 +640,13 @@ class PanelTests(_Controlled):
 
     def test_near_the_edge_will_do(self):
         s = self.screen
-        self.rest_at(s.right() - self.panel_module.NEAR - 20, s.center().y(), 0.5)
+        near, half = self.panel_module.NEAR, self.panel.tab.height() // 2
+        self.rest_at(s.right() - near - 6, s.center().y(), 0.5)
         self.assertFalse(self.panel.isVisible(), 'not out in the screen')
-        self.rest_at(s.right() - self.panel_module.NEAR + 10, s.center().y() + 100, 0.5)    # past the tab's end
-        self.assertTrue(self.panel.isVisible(), 'a little in from the edge, beside the panel')
+        self.rest_at(s.right(), s.center().y() + half + 12, 0.5)
+        self.assertFalse(self.panel.isVisible(), 'not past the tab’s end, even right at the edge')
+        self.rest_at(s.right() - near + 6, s.center().y() + half - 4, 0.5)
+        self.assertTrue(self.panel.isVisible(), 'a little in from the edge, level with the tab')
 
     def test_not_at_the_ends_of_the_edge_nor_over_anything_full_screen(self):
         s = self.screen

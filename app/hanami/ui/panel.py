@@ -12,8 +12,8 @@ until it is moved - the tab dragged up or down, or the handle along the panel's 
 along the edge its middle is, as a share of the screen's height). The tab keeps out of the way of
 games and anything else full screen (quiet), and of the panel itself while that is out.
 
-The pointer need not be right against the edge: anywhere within NEAR of it, beside where the panel
-sits, will do. Only an edge with no screen beyond it counts - passing through to another screen
+The pointer need not be right against the edge: anywhere within NEAR of it, level with the tab,
+will do. Only an edge with no screen beyond it counts - passing through to another screen
 never brings the panel out - and the pointer has to stay a moment (DWELL), with no button held,
 and not over a game or anything else full screen (quiet, as Hanami says). While one of those is
 in front, the panel doesn't watch the pointer at all: it only looks, now and then (QUIET_EVERY),
@@ -54,7 +54,7 @@ FOLD_MS = 220           # the volume and brightness sliders dropping down, or fo
 LEVELS = ''       # Segoe Fluent Icons: Equalizer - two sliders, for the volume and brightness
 WHEEL_STEP = 2          # % a slider moves for each notch of the scroll wheel over it
 MARGIN = 10           # between the panel and the screen's edge
-NEAR = 48               # px in from the screen's edge that count as at it
+NEAR = 24               # px in from the screen's edge that count as at it
 DWELL = 0.3             # s the pointer rests at the edge before the panel comes out
 LEAVE = 0.45            # s after the pointer leaves it before it slides away
 WATCH_MS = 60
@@ -1153,13 +1153,10 @@ class EdgePanel(QWidget):
         return round(self._middle(screen, height) - height / 2)
 
     def _zone(self, screen: QRect) -> tuple[int, int]:
-        """Where along the edge resting brings it out: beside where the panel comes out, and
-        around the tab - a fifth of the screen's height at least, so it is easy to hit."""
-        height = self._height(screen)
-        top = self._top(screen, height)
+        """Where along the edge resting brings it out: level with the tab, from its top to its
+        bottom (the user's wish: more of the edge than that brought it out unasked)."""
         tab = self._middle(screen, self.tab.height())
-        reach = max(self.tab.height() + 40, screen.height() // 5) / 2
-        return round(min(top, tab - reach)), round(max(top + height, tab + reach))
+        return round(tab - self.tab.height() / 2), round(tab + self.tab.height() / 2)
 
     def _places(self, screen: QRect) -> tuple[QPoint, QPoint]:
         """Where it rests, and where it slides from - just beyond the edge."""
