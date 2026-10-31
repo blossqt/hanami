@@ -256,7 +256,7 @@ class SettingsWindow(QWidget):
             button.clicked.connect(self._panel_edited)
             self.panel_edges.addButton(button)
             self.edge_buttons[name] = button
-            row.addWidget(button)
+        row.addWidget(suitesettings.Segmented(list(self.edge_buttons.values())))
         row.addStretch(1)
         box.addLayout(row)
         layout.addWidget(frame)
@@ -393,7 +393,7 @@ class SettingsWindow(QWidget):
             button.clicked.connect(lambda _, n=name: theme.set_mode(n))
             self.modes.addButton(button)
             self.mode_buttons[name] = button
-            row.addWidget(button)
+        row.addWidget(suitesettings.Segmented(list(self.mode_buttons.values())))
         row.addStretch(1)
         box.addLayout(row)
         layout.addWidget(frame)
@@ -447,7 +447,7 @@ class SettingsWindow(QWidget):
             button.clicked.connect(lambda _, n=name: theme.set_game_downloads(n))
             self.game_downloads.addButton(button)
             self.download_buttons[name] = button
-            row.addWidget(button)
+        row.addWidget(suitesettings.Segmented(list(self.download_buttons.values())))
         row.addStretch(1)
         box.addLayout(row)
         box.addWidget(_label('Slowed down, they take at most 1 MB/s down and 64 KB/s up.', 8.5, role='dim', wrap=True))
