@@ -164,6 +164,7 @@ class SettingsWindow(QWidget):
     brightness_changed = Signal(bool)               # the panel's brightness sliders: on or off
     buttons_changed = Signal(list)                  # the panel's buttons: names from panel.BUTTONS
     check_now = Signal()
+    update_hanami_now = Signal()                    # put the newer Hanami in now, restarting it
     show_page = Signal(str)
     open_url = Signal(str)
 
@@ -584,6 +585,12 @@ class SettingsWindow(QWidget):
         row.addWidget(self.check_button)
         self.checked = _label('', 9, role='dim')
         row.addWidget(self.checked, 1)
+        self.update_now = QPushButton('Update Hanami')
+        self.update_now.setProperty('role', 'primary')
+        self.update_now.setCursor(Qt.PointingHandCursor)
+        self.update_now.clicked.connect(self.update_hanami_now)
+        self.update_now.hide()                      # until there is a newer Hanami to put in
+        row.addWidget(self.update_now)
         box.addSpacing(4)
         box.addLayout(row)
         layout.addWidget(frame)
@@ -811,6 +818,13 @@ class SettingsWindow(QWidget):
         self.credit.setText(f'The blossom behind this window is a photo by <a href="https://unsplash.com/photos/'
                             f'pkpqoBp11Jc" {link}>Mi Min</a> on Unsplash, and the one behind the edge panel by '
                             f'<a href="https://unsplash.com/photos/j3TrGxN_rCM" {link}>Yan Liu</a>.')
+
+    def show_hanami_update(self, version: str, updating: bool) -> None:
+        """The button to update Hanami now: with a newer one (version) to put in - and, once
+        asked, what it is doing until Hanami restarts."""
+        self.update_now.setVisible(bool(version))
+        self.update_now.setEnabled(not updating)
+        self.update_now.setText(f'Updating to {version}…' if updating else f'Update to {version} now')
 
     def show_checked(self, text: str, checking: bool) -> None:
         self.checked.setText(text)

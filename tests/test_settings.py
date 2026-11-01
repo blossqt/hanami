@@ -537,6 +537,31 @@ class SelfUpdateTests(_Controlled):
         self.settle(lambda: self.started)
         self.assertEqual(len(self.started), 1, 'asked: at once')
 
+    def test_asked_it_goes_ahead_of_one_waiting(self):
+        self.controller.show_settings('Updates')
+        window = self.controller.settings_window
+        try:
+            self.assertTrue(window.update_now.isVisibleTo(window), 'a newer Hanami: the button to put it in')
+            self.assertEqual(window.update_now.text(), 'Update to 9.9.9 now')
+            self.controller._auto_update()
+            self.settle(lambda: self.controller._staged_self is not None)
+            self.assertEqual(self.started, [], 'by itself, it waits while Settings is open')
+            self.assertTrue(self.controller._hand_over_timer.isActive())
+            window.update_now.click()
+            self.assertEqual(len(self.started), 1, 'asked: it goes in at once, Settings open or not')
+            self.assertEqual(self.quit, [1])
+            self.assertEqual(self.prepared, ['9.9.9'], 'what was fetched already, not fetched again')
+        finally:
+            window.close()
+
+    def test_asked_while_it_is_still_being_fetched(self):
+        self.controller.panel.show()
+        self.controller._auto_update()
+        self.controller.update_hanami()                         # asked before it is ready
+        self.settle(lambda: self.started)
+        self.assertEqual(len(self.started), 1, 'it goes in as soon as it is ready, the panel out or not')
+        self.controller.panel.hide()
+
     def test_not_run_from_source(self):
         from unittest import mock
         with mock.patch.object(hanami.installer, 'own_folder', lambda: None):

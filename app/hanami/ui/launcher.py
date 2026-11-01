@@ -290,12 +290,14 @@ class LauncherWindow(QWidget):
         theme.restyle(self, self._style)
         self.show_hanami('')
 
-    def show_hanami(self, newer: str, updating: str = '', can_update: bool = False) -> None:
+    def show_hanami(self, newer: str, updating: str = '', can_update: bool = False, waiting: bool = False) -> None:
         """The footer: Hanami's version, and a newer one if there is one - to update to here (or,
         run from source, to see on GitHub) - or the one being put in."""
         words = f'Hanami {__version__}  ·  Closing this window keeps Hanami in the tray.'
         link = f'style="color:{theme.ink()}; text-decoration:none"'
-        if updating:
+        if updating and waiting:              # put in by itself, waiting for Hanami to be out of use
+            words += f'  ·  <a href="update" {link}>Hanami {updating} is ready - restart to update</a>'
+        elif updating:
             words += f'  ·  Updating to Hanami {updating}…'
         elif newer and can_update:
             words += f'  ·  <a href="update" {link}>Hanami {newer} is out - update</a>'

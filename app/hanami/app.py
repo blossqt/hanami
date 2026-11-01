@@ -1001,6 +1001,15 @@ class Controller(QObject):
         """Put the newest Hanami in: downloaded, unpacked and checked beside this one while it runs
         on; then handed over to (asked: at once; by itself, once Hanami isn't in use)."""
         release = self.hanami_update()
+        if asked and self._self_update is not None:
+            # One already under way by itself, waiting for Hanami to be out of use (or still
+            # downloading): asked for, it goes ahead now. Until 0.1.48 this did nothing, and one
+            # waiting behind an open Settings window waited for as long as it stayed open.
+            self._self_update_asked = True
+            self._update_window()
+            if self._staged_self is not None:
+                self._hand_over()
+            return
         if release is None or self._self_update is not None or self._clearing:
             return                                      # (clearing: once the last update's leftovers are gone)
         self._self_update, self._self_update_asked = release.version, asked
@@ -1441,6 +1450,7 @@ class Controller(QObject):
             self.settings_window.updates_changed.connect(self._updates_changed)
             self.settings_window.hanami_updates_changed.connect(self._hanami_updates_changed)
             self.settings_window.check_now.connect(self.check_releases)
+            self.settings_window.update_hanami_now.connect(lambda: self.update_hanami(asked=True))
             self.settings_window.show_page.connect(self.show_page)
             self.settings_window.open_url.connect(lambda url: QDesktopServices.openUrl(QUrl(url)))
         if page:
@@ -1455,6 +1465,7 @@ class Controller(QObject):
         self.settings_window.show_sound_problem(self.sound_problem)
         self.settings_window.show_text_problem(self.text_problem)
         self._show_checked()
+        self._show_hanami_update()
         self.settings_window.show()
         self.settings_window.raise_()
         self.settings_window.activateWindow()
@@ -1471,13 +1482,23 @@ class Controller(QObject):
                          total=job.total if job else 0, starting=name in self._starting)
 
     def _update_window(self) -> None:
+        self._show_hanami_update()
         if self.window is None:
             return
         for app in catalog.SUITE:
             self.window.cards[app.name].show_state(self.card_state(app.name))
         mine = self.latest.get(catalog.HANAMI.name)
         self.window.show_hanami(mine.version if mine and releases.is_newer(mine.version, __version__) else '',
-                                self._self_update or '', self.hanami_update() is not None)
+                                self._self_update or '', self.hanami_update() is not None,
+                                waiting=self._staged_self is not None and not self._self_update_asked)
+
+    def _show_hanami_update(self) -> None:
+        """Settings > Updates' button to update Hanami now: with a newer Hanami to put in."""
+        if self.settings_window is None:
+            return
+        newer = self.hanami_update()
+        self.settings_window.show_hanami_update(newer.version if newer is not None else '',
+                                                bool(self._self_update and self._self_update_asked))
 
     def _exe_chosen(self, name: str, path: str) -> None:
         self.settings.set_exe(name, path)
