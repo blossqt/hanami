@@ -607,7 +607,7 @@ class SettingsWindow(QWidget):
         row.addWidget(logo, 0, Qt.AlignTop)
         words = QVBoxLayout()
         words.setSpacing(4)
-        words.addWidget(_label(f'Hanami {__version__}', 13, QFont.DemiBold))
+        words.addWidget(suitesettings.heading(f'Hanami {__version__}', 16))
         words.addWidget(_label('The suite’s launcher. It keeps one tray icon for every suite app, and installs and '
                                'updates them from their signed releases.', 9, role='dim', wrap=True))
         buttons = QHBoxLayout()

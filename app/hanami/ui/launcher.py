@@ -18,6 +18,13 @@ from .settings import glyph_font
 from .sound import SoundToggle
 
 
+def _serif(text: str, size: float) -> QLabel:
+    """A name or title, in the suite's Geist Serif."""
+    label = QLabel(text)
+    label.setFont(theme.serif(size))
+    return label
+
+
 def _label(text: str, size: float, weight=QFont.Normal, role: str = '') -> QLabel:
     label = QLabel(text)
     label.setFont(theme.font(size, weight))
@@ -86,7 +93,7 @@ class AppCard(QFrame):
         text.setSpacing(4)
         heading = QHBoxLayout()
         heading.setSpacing(8)
-        heading.addWidget(_label(app.name, 11.5, QFont.DemiBold))
+        heading.addWidget(_serif(app.name, 14))
         self.version = _label('', 8.5, role='dim')
         heading.addWidget(self.version, 0, Qt.AlignBaseline)
         heading.addStretch(1)
@@ -247,7 +254,7 @@ class LauncherWindow(QWidget):
         logo = QLabel()
         logo.setPixmap(icons.render_app_icon(40))
         top.addWidget(logo, 0, Qt.AlignVCenter)
-        top.addWidget(_label('Hanami', 17, QFont.DemiBold), 1, Qt.AlignVCenter)
+        top.addWidget(_serif('Hanami', 21), 1, Qt.AlignVCenter)
         self.sound = SoundToggle()
         self.sound.chosen.connect(self.output_clicked)
         top.addWidget(self.sound, 0, Qt.AlignVCenter)
