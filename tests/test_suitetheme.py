@@ -21,7 +21,7 @@ for name in ('SUITE_LOOK', 'SUITE_MODE', 'SUITE_MOTION'):
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
 
 from PySide6.QtCore import QEventLoop, QPoint, QRect, QRectF, QSize, Qt, QTimer  # noqa: E402
-from PySide6.QtGui import QColor, QPainter, QPixmap  # noqa: E402
+from PySide6.QtGui import QColor, QFont, QPainter, QPixmap  # noqa: E402
 from PySide6.QtWidgets import (QApplication, QCheckBox, QLineEdit, QPushButton, QStyle, QToolButton,  # noqa: E402
                                QVBoxLayout, QWidget)
 
@@ -699,6 +699,17 @@ class MotionTests(unittest.TestCase):
         bar.setValue(10)
         self.assertEqual(bar.value(), 10, 'going back is at once')
         window.close()
+
+
+
+class SerifTests(unittest.TestCase):
+    def test_headings_are_geist_serif(self):
+        self.assertEqual(suitetheme.serif(20).family(), 'Geist Serif')
+        self.assertEqual(suitetheme.serif(20).pointSizeF(), 20)
+
+    def test_without_the_file_headings_are_segoe(self):
+        with mock.patch.object(suitetheme, '_serif', ['']):
+            self.assertEqual(suitetheme.serif(17).weight(), QFont.DemiBold)
 
 
 if __name__ == '__main__':
