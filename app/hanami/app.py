@@ -68,6 +68,9 @@ class Settings:
         path = os.environ.get('HANAMI_SETTINGS')
         self._store = QSettings(path, QSettings.IniFormat) if path else QSettings('Hanami', 'Hanami')
 
+    def sync(self) -> None:
+        self._store.sync()
+
     @property
     def start_with(self) -> list[str]:
         try:
@@ -1695,4 +1698,14 @@ def main(argv: list[str] | None = None) -> int:
     if not controller.host.listening:
         QMessageBox.warning(None, 'Hanami', 'Hanami could not open its tray link; the apps will keep '
                             'their own icons.')
-    return app.exec()
+    code = app.exec()
+    controller.settings.sync()
+    sys.stdout and sys.stdout.flush()
+    sys.stderr and sys.stderr.flush()
+    # Ended here, not by Python's own exit: PySide's teardown of the tray menu could spin a core
+    # forever with every window gone (0.1.49), and a self-update waits for this process to end.
+    # TerminateProcess skips the DLLs' teardown too, where os._exit crashed with Qt still alive.
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+    kernel32.TerminateProcess(ctypes.c_void_p(kernel32.GetCurrentProcess()), code)
+    return code
