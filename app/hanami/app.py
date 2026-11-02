@@ -250,6 +250,15 @@ class Settings:
         self._store.setValue('panel/pages', json.dumps([name for name in PAGES if name in names]))
 
     @property
+    def window_sound(self) -> bool:
+        """Whether Hanami's window shows its speakers/headphones switch at the top."""
+        return self._flag('window/sound', True)
+
+    @window_sound.setter
+    def window_sound(self, on: bool) -> None:
+        self._store.setValue('window/sound', 'true' if on else 'false')
+
+    @property
     def panel_brightness(self) -> bool:
         """Whether the edge panel has a brightness slider for each monitor that has one."""
         return str(self._store.value('panel/brightness', 'true')).lower() == 'true'
@@ -770,6 +779,11 @@ class Controller(QObject):
         self.panel.show_brightness(found)
         if self.settings_window is not None:
             self.settings_window.show_monitors([monitor.name for monitor in found])
+
+    def _window_sound_changed(self, on: bool) -> None:
+        self.settings.window_sound = on
+        if self.window is not None:
+            self.window.sound.setVisible(on)
 
     def _brightness_changed(self, on: bool) -> None:
         self.settings.panel_brightness = on
@@ -1305,7 +1319,8 @@ class Controller(QObject):
             self._say('Hanami', f'{name} {version} is installed.' if job.kind == 'install'
                                   else f'{name} is updated to {version}.', icons.app_icon(), 4000)
             if job.restart and not DEV:
-                self.open_app(name)
+                # A new install opens; an update starts again in the tray, as it was (the user's wish)
+                self.open_app(name, startup=job.kind != 'install')
         self._refresh()
         self._changed()
 
@@ -1420,6 +1435,7 @@ class Controller(QObject):
     def _make_window(self) -> LauncherWindow:
         if self.window is None:
             self.window = LauncherWindow()
+            self.window.sound.setVisible(self.settings.window_sound)
             suitesettings.shortcut_sheet(self.window, 'Hanami', self._shortcut_groups)
             self.window.settings_clicked.connect(self.show_settings)
             self.window.open_app.connect(self.open_app)
@@ -1452,9 +1468,11 @@ class Controller(QObject):
                                                    s.update_hanami),
                                                   (s.sound_hotkey_on, s.sound_hotkey), s.panel_edge, s.panel_tab,
                                                   s.pinned, s.panel_pages, s.panel_brightness,
-                                                  (s.text_hotkey_on, s.text_hotkey), s.panel_buttons)
+                                                  (s.text_hotkey_on, s.text_hotkey), s.panel_buttons,
+                                                  s.window_sound)
             self.settings_window.startup_changed.connect(self._startup_changed)
             self.settings_window.sound_changed.connect(self._sound_changed)
+            self.settings_window.window_sound_changed.connect(self._window_sound_changed)
             self.settings_window.text_changed.connect(self._text_changed)
             self.settings_window.output_chosen.connect(self._output_chosen)
             self.settings_window.panel_changed.connect(self._panel_changed)

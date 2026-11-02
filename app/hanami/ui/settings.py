@@ -154,6 +154,7 @@ class SettingsWindow(QWidget):
     updates_changed = Signal(bool, bool, bool)      # look by itself, tell me, install by itself
     hanami_updates_changed = Signal(bool)           # Hanami updates itself
     sound_changed = Signal(bool, str)               # the hotkey on, the hotkey
+    window_sound_changed = Signal(bool)             # the switch at the top of Hanami's window: shown or not
     text_changed = Signal(bool, str)                # copying text from the screen: the hotkey on, the hotkey
     output_chosen = Signal(str, str, str)           # 'speakers' or 'headphones', the output's id ('' for none), its name
     panel_changed = Signal(str)                     # the edge the panel slides out at: 'right', 'left' or '' (off)
@@ -175,7 +176,8 @@ class SettingsWindow(QWidget):
                  sound: tuple[bool, str] = (True, ''), panel_edge: str = 'right',
                  tab: tuple[int, int, int] | None = None, pinned: list | None = None,
                  panel_pages: list[str] | None = None, brightness_on: bool = True,
-                 text: tuple[bool, str] = (True, ''), panel_buttons: list[str] | None = None):
+                 text: tuple[bool, str] = (True, ''), panel_buttons: list[str] | None = None,
+                 window_sound: bool = True):
         super().__init__()
         self.setWindowTitle('Hanami settings')
         self.setWindowIcon(icons.app_icon())
@@ -186,7 +188,7 @@ class SettingsWindow(QWidget):
         made = [self._general(start_with, starts_with_windows),
                 self._scrolled(self._edge_panel(panel_edge, tab, list(pinned or []), panel_pages, brightness_on,
                                                 panel_buttons)),
-                self._appearance(), self._games(), self._sound(*sound), self._screen_text(*text),
+                self._appearance(), self._games(), self._sound(*sound, window_sound), self._screen_text(*text),
                 self._updates(*updates), self._about()]
         for (mark, title), widget in zip(self.PAGES, made):
             frame.add_widget(mark, title, widget)
@@ -228,7 +230,7 @@ class SettingsWindow(QWidget):
         self.startup.toggled.connect(self._startup_edited)
         layout.addWidget(frame)
         frame, box = _section('The tray')
-        box.addWidget(_label('Closing Hanami’s window keeps it in the tray, as the blossom. Its menu holds each running '
+        box.addWidget(_label('Closing Hanami’s window keeps it running in the tray. Its tray menu holds each running '
                              'app’s own menu, and Quit Hanami.', suitesettings.SMALL, role='dim', wrap=True))
         layout.addWidget(frame)
         layout.addStretch(1)
@@ -463,7 +465,7 @@ class SettingsWindow(QWidget):
         layout.addStretch(1)
         return page
 
-    def _sound(self, on: bool, hotkey: str) -> QWidget:
+    def _sound(self, on: bool, hotkey: str, window_sound: bool = True) -> QWidget:
         page, layout = self._page('Sound', '')
         frame, box = _section('Sound output')
         grid = QGridLayout()
@@ -481,8 +483,10 @@ class SettingsWindow(QWidget):
             grid.addWidget(combo, row, 1)
         grid.setColumnStretch(2, 1)
         box.addLayout(grid)
-        box.addWidget(_label('The switch at the top of Hanami’s window goes between these two.', suitesettings.SMALL, role='dim',
-                             wrap=True))
+        holder, self.window_sound = _switch('Show the switch in Hanami’s window',
+                                            'At the top of the window, it goes between these two.', window_sound)
+        self.window_sound.toggled.connect(self.window_sound_changed)
+        box.addWidget(holder)
         holder, self.sound_on = _switch('Switch between them with a hotkey', 'A pop-up names the output it went '
                                         'to.', on)
         self.sound_on.toggled.connect(self._sound_edited)
@@ -816,9 +820,9 @@ class SettingsWindow(QWidget):
 
     def _show_credit(self) -> None:
         link = f'style="color:{theme.ink()}; text-decoration:none"'
-        self.credit.setText(f'The blossom behind this window is a photo by <a href="https://unsplash.com/photos/'
-                            f'pkpqoBp11Jc" {link}>Mi Min</a> on Unsplash, and the one behind the edge panel by '
-                            f'<a href="https://unsplash.com/photos/j3TrGxN_rCM" {link}>Yan Liu</a>.')
+        self.credit.setText(f'The image behind this window is a photo by <a href="https://unsplash.com/photos/'
+                            f'pkpqoBp11Jc" {link}>Mi Min</a> on Unsplash. The image behind the edge panel is a photo by '
+                            f'<a href="https://unsplash.com/photos/j3TrGxN_rCM" {link}>Yan Liu</a>, also on Unsplash.')
 
     def show_hanami_update(self, version: str, updating: bool) -> None:
         """The button to update Hanami now: with a newer one (version) to put in - and, once

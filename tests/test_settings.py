@@ -319,6 +319,29 @@ class SoundTests(_Controlled):
         controller._refresh()
         self.assertIsNone(toggle.side, 'neither of the two')
 
+    def test_the_window_switch_shown_or_hidden_from_settings(self):
+        controller = self.controller
+        window = controller._make_window()
+        window.show()
+        self.assertTrue(window.sound.isVisible(), 'shown until turned off')
+        settings = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY),
+                                  window_sound=controller.settings.window_sound)
+        settings.window_sound_changed.connect(controller._window_sound_changed)
+        try:
+            self.assertTrue(settings.window_sound.isChecked())
+            settings.window_sound.setChecked(False)
+            self.assertFalse(window.sound.isVisible(), 'hidden at once')
+            self.assertFalse(controller.settings.window_sound, 'and kept')
+            window.close()
+            controller.window = None
+            self.assertFalse(controller._make_window().sound.isVisibleTo(controller.window),
+                             'a window made later keeps it hidden')
+            settings.window_sound.setChecked(True)
+            self.assertTrue(controller.window.sound.isVisibleTo(controller.window))
+        finally:
+            controller.settings.window_sound = True
+            settings.close()
+
     def test_without_headphones_the_switch_asks_for_them(self):
         self.outputs = [o for o in self.outputs if o.id != 'hp']
         self.controller.choose_output('headphones')
@@ -453,6 +476,30 @@ class InstallProgressTests(_Controlled):
         self.assertLessEqual(max(others.values()), 4, f'the other cards left alone: {others}')
         self.controller.window.close()
         self.controller.settings.set_installed('Grabbit', None)
+
+
+class RestartTests(_Controlled):
+    """An app quit for its update starts again in the tray (the user's wish, 2026-11-02); a new
+    install opens."""
+
+    def test_an_update_starts_it_in_the_tray_and_an_install_opens_it(self):
+        from hanami import releases
+        asset = releases.Asset('Grabbit-9.0.0-win64.zip', 1, '0' * 64, 'https://example.invalid/g.zip')
+        self.controller.latest['Grabbit'] = releases.Release('Grabbit', '9.0.0', '', '', asset)
+        started = []
+        self.controller.open_app = lambda name, startup=False: started.append((name, startup))
+        self.controller.settings.set_installed = lambda *args, **kwargs: None    # nothing really installed
+        dev, hanami.DEV = hanami.DEV, False
+        try:
+            for kind in ('update', 'install'):
+                job = hanami._Job('Grabbit', kind)
+                job.restart = True
+                self.controller.jobs['Grabbit'] = job
+                self.controller._job_finished('Grabbit', WORK / 'Grabbit')
+        finally:
+            hanami.DEV = dev
+        self.assertEqual(started, [('Grabbit', True), ('Grabbit', False)])
+        self.assertEqual(hanami.catalog.BY_NAME['Grabbit'].startup_args, ('--startup',), 'Grabbit stays in the tray')
 
 
 class SelfUpdateTests(_Controlled):
