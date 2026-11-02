@@ -71,8 +71,8 @@ class _Actions(QFrame):
         self.setObjectName('actions')
         theme.restyle(self, lambda: theme.card_style() + theme.panel_css('QFrame#actions', 18))
         row = QHBoxLayout(self)
-        row.setContentsMargins(8, 6, 8, 6)
-        row.setSpacing(6)
+        row.setContentsMargins(8, 8, 8, 8)
+        row.setSpacing(8)
         self.copy = QPushButton('Copy')
         self.copy.setProperty('role', 'primary')
         self.search = QPushButton('Search')
@@ -376,7 +376,7 @@ class _Shade(QWidget):
         return 'Circle or drag across text  ·  Esc to close'
 
     def _hint_rect(self) -> QRect:
-        metrics = QFontMetrics(theme.font(10, QFont.DemiBold))
+        metrics = QFontMetrics(theme.font(10.5, QFont.DemiBold))
         width = metrics.horizontalAdvance('Circle or drag across text  ·  Esc to close') + 44
         return QRect((self.width() - width) // 2, 22, width, 38)
 
@@ -452,7 +452,7 @@ class _Shade(QWidget):
             return
         c = theme.colors()
         painter.setOpacity(self._appear)
-        font = theme.font(10, QFont.DemiBold)
+        font = theme.font(10.5, QFont.DemiBold)
         width = QFontMetrics(font).horizontalAdvance(words) + 44
         rect = QRectF((self.width() - width) / 2, 22, width, 38)
         card = QColor(c.card)

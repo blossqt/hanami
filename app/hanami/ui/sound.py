@@ -11,11 +11,11 @@ from PySide6.QtGui import QColor, QCursor, QFont, QFontMetrics, QGuiApplication,
 from PySide6.QtWidgets import QWidget
 
 from . import theme
-from .settings import glyph_font
+from .suitesettings import draw_mark
 
 HEIGHT = 56
 SHOWN_FOR = 1600        # ms
-SPEAKER, HEADPHONES = '\uE7F5', '\uE7F6'
+SPEAKER, HEADPHONES = 'speaker', 'headphones'     # the suite's icons (suiteicons)
 SIDES = ('speakers', 'headphones')
 _HEADPHONE_WORDS = ('headphone', 'headset', 'earbud', 'earphone', 'airpods')
 
@@ -66,10 +66,10 @@ class SoundToggle(QWidget):
         if theme.look() == 'liquid':
             spring = QEasingCurve(QEasingCurve.OutBack)
             spring.setOvershoot(1.2)
-            slide.setDuration(340)
+            slide.setDuration(theme.GENTLE)
             slide.setEasingCurve(spring)
         else:
-            slide.setDuration(220)
+            slide.setDuration(theme.STEADY)
             slide.setEasingCurve(QEasingCurve.OutCubic)
         slide.valueChanged.connect(lambda v: (setattr(self, '_at', float(v)), self.update()))
         self._moving = slide
@@ -120,11 +120,11 @@ class SoundToggle(QWidget):
             painter.setPen(QPen(c.edge, 1))
             painter.setBrush(QColor(theme.ACCENT))
             painter.drawRoundedRect(knob, bend - 3, bend - 3)
-        painter.setFont(glyph_font(13 * min(1.0, self.height() / self.HEIGHT)))
+        size = round(18 * min(1.0, self.height() / self.HEIGHT))
         for index, glyph in enumerate((SPEAKER, HEADPHONES)):
             lit = self._at is not None and abs(self._at - index) < 0.5
-            painter.setPen(QColor(theme.ON_ACCENT) if lit else c.text if self._hover and index == target else c.dim)
-            painter.drawText(QRectF(r.x() + 3 + index * half, r.y(), half, r.height()), Qt.AlignCenter, glyph)
+            draw_mark(painter, QRectF(r.x() + 3 + index * half, r.y(), half, r.height()), glyph,
+                      QColor(theme.ON_ACCENT) if lit else c.text if self._hover and index == target else c.dim, size)
         if self.hasFocus():
             painter.setPen(QPen(c.edge, 1.5))
             painter.setBrush(Qt.NoBrush)
@@ -132,7 +132,7 @@ class SoundToggle(QWidget):
         painter.end()
 
 
-MIC, MIC_OFF = '', ''
+MIC, MIC_OFF = 'mic', 'mic_off'
 MUTED = '#e03131'               # the muted microphone's red (on dark, MUTED_DARK)
 MUTED_DARK = '#ff6b6b'
 
@@ -197,7 +197,6 @@ class MicButton(QWidget):
                 painter.fillPath(shape, QColor(255, 255, 255, 40 if theme.is_dark() else 120))
             painter.setPen(QPen(c.border, 1))
         painter.drawPath(shape)
-        painter.setFont(glyph_font(13))
         if self.muted:
             painter.setPen(red)
         elif self.muted is None:
@@ -206,7 +205,7 @@ class MicButton(QWidget):
             painter.setPen(dim)
         else:
             painter.setPen(c.text if self._hover else c.dim)
-        painter.drawText(r, Qt.AlignCenter, MIC_OFF if self.muted else MIC)
+        draw_mark(painter, QRectF(r), MIC_OFF if self.muted else MIC, painter.pen().color(), 18)
         if self.hasFocus():
             painter.setPen(QPen(c.edge, 1.5))
             painter.setBrush(Qt.NoBrush)
@@ -265,9 +264,7 @@ class SoundPopup(QWidget):
         rect = QRectF(self.rect())
         theme.paint_glass(painter, rect)
         c = theme.colors()
-        painter.setFont(glyph_font(15))
-        painter.setPen(QColor(theme.ink()))
-        painter.drawText(QRectF(18, 0, 30, HEIGHT), Qt.AlignVCenter | Qt.AlignLeft, self.glyph)
+        draw_mark(painter, QRectF(18, 0, 24, HEIGHT), self.glyph, QColor(theme.ink()), 20)
         painter.setFont(theme.font(10.5, QFont.DemiBold))
         painter.setPen(c.text)
         painter.drawText(rect.adjusted(56, 0, -18, 0), Qt.AlignVCenter | Qt.AlignLeft,

@@ -712,5 +712,90 @@ class SerifTests(unittest.TestCase):
             self.assertEqual(suitetheme.serif(17).weight(), QFont.DemiBold)
 
 
+class ScaleTests(unittest.TestCase):
+    """The suite's one scale of text, gaps and timings (2026-11-01)."""
+
+    def test_roles(self):
+        self.assertEqual(suitetheme.text('body').pointSizeF(), suitetheme.TYPE['body'])
+        self.assertEqual(suitetheme.text('title').family(), 'Geist Serif')
+        self.assertNotEqual(suitetheme.text('caption').family(), 'Geist Serif')
+        self.assertLess(suitetheme.QUICK, suitetheme.STEADY)
+        self.assertLess(suitetheme.STEADY, suitetheme.GENTLE)
+        self.assertTrue(all(step % 4 == 0 for step in suitetheme.SPACE))
+
+    def test_figures_are_one_width(self):
+        from PySide6.QtGui import QFontMetricsF
+        metrics = QFontMetricsF(suitetheme.font(9.5))
+        self.assertEqual({round(metrics.horizontalAdvance(d), 2) for d in '0123456789'}.__len__(), 1)
+
+
+class WallTests(unittest.TestCase):
+    def test_tint_leans_to_the_wallpaper(self):
+        with mock.patch.object(suitetheme, '_wall', None):
+            self.assertEqual(suitetheme.walled(QColor(255, 255, 255, 80)), QColor(255, 255, 255, 80))
+        with mock.patch.object(suitetheme, '_wall', QColor('#3366cc')):
+            tinted = suitetheme.walled(QColor(255, 255, 255, 80))
+            self.assertEqual(tinted.alpha(), 80)
+            self.assertGreater(tinted.blue(), tinted.red())       # blue-ish, still nearly white
+            self.assertGreater(tinted.lightnessF(), 0.9)
+            dark = suitetheme.walled(QColor(10, 10, 12, 112))
+            self.assertLess(dark.lightnessF(), 0.15)
+
+    def test_no_wallpaper_read_offscreen(self):
+        with mock.patch.object(suitetheme, '_wall', None), mock.patch.object(suitetheme, '_suite_changed') as changed:
+            suitetheme._look_at_wall()
+            changed.assert_not_called()
+
+
+class FocusRingTests(unittest.TestCase):
+    def setUp(self):
+        self.window = QWidget()
+        layout = QVBoxLayout(self.window)
+        self.first, self.second = QPushButton('One'), QPushButton('Two')
+        layout.addWidget(self.first)
+        layout.addWidget(self.second)
+        self.window.show()
+        app.processEvents()
+
+    def tearDown(self):
+        self.window.close()
+        suitetheme._focus()._hide()
+
+    def test_a_ring_for_the_keyboard_none_for_the_mouse(self):
+        from PySide6.QtGui import QFocusEvent
+        ring = suitetheme._focus()
+        ring.eventFilter(self.second, QFocusEvent(QFocusEvent.Type.FocusIn, Qt.TabFocusReason))
+        self.assertIs(ring._on, self.second)
+        self.assertTrue(ring._ring.isVisible())
+        self.assertGreater(ring._ring.width(), self.second.width())
+        ring.eventFilter(self.first, QFocusEvent(QFocusEvent.Type.FocusIn, Qt.MouseFocusReason))
+        self.assertIsNone(ring._ring)
+
+
+class PressTests(unittest.TestCase):
+    def test_a_pressed_button_gives(self):
+        button = QPushButton('Press')
+        button.resize(120, 34)
+        with mock.patch.object(suitetheme, 'motion_on', return_value=True):
+            scale, image = suitetheme._sink(button, {'press': 1.0, 'hover': 0.0})
+            self.assertLess(scale, 1.0)
+            self.assertGreater(scale, 0.95)
+            self.assertFalse(image.isNull())
+            self.assertIsNone(suitetheme._sink(button, {'press': 0.0, 'hover': 1.0}))
+
+
+class IconTests(unittest.TestCase):
+    def test_one_set(self):
+        from hanami.ui import suiteicons
+        for name in ('gear', 'speaker', 'headphones', 'mic', 'mic_off', 'sliders', 'check', 'info', 'trash'):
+            self.assertFalse(suiteicons.pixmap(name, '#c2255c', 18).isNull(), name)
+        self.assertTrue(suiteicons.pixmap('no such icon', '#000000').isNull())
+
+
+class PlaceTests(unittest.TestCase):
+    def test_offscreen_windows_keep_no_place(self):
+        self.assertIsNone(suitetheme._place_name(QWidget()))      # tests never write the person's registry
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

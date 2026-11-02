@@ -34,7 +34,7 @@ from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QToolTip, QVBoxLayout, Q
 from .. import win32
 from . import icons, theme
 from .pins import MOST as PINS_MOST
-from .settings import glyph_font
+from .suitesettings import draw_mark
 from .sound import MicButton, SoundToggle
 
 PHOTO = str(Path(__file__).with_name('panel.jpg'))     # Yan Liu's blossom, on Unsplash
@@ -50,8 +50,8 @@ STATS_QUICK = 250, 2.0  # ms between samples, for the first s of it: so the proc
                         # shows as soon as Hanami Sensors has it, when it has just been started
 SET_HELD = 2.0          # s after a brightness slider is moved during which a reading doesn't move it back
                         # (the reading may be from before)
-FOLD_MS = 220           # the volume and brightness sliders dropping down, or folding away
-LEVELS = ''       # Segoe Fluent Icons: Equalizer - two sliders, for the volume and brightness
+FOLD_MS = theme.STEADY           # the volume and brightness sliders dropping down, or folding away
+LEVELS = 'sliders'           # the suite's icon of two sliders, for the volume and brightness
 WHEEL_STEP = 2          # % a slider moves for each notch of the scroll wheel over it
 MARGIN = 10           # between the panel and the screen's edge
 NEAR = 24               # px in from the screen's edge that count as at it
@@ -252,7 +252,7 @@ class _AppButton(QWidget):
             return
         theme.stop_animation(self._moving)
         lift = QVariantAnimation(self)
-        lift.setDuration(160 if value else 260)
+        lift.setDuration(theme.QUICK if value else theme.STEADY)
         lift.setStartValue(self._lift)
         lift.setEndValue(value)
         lift.setEasingCurve(QEasingCurve.OutCubic)
@@ -350,7 +350,7 @@ class _Stat(QWidget):
             self.update()
             return
         glide = self._glide = QVariantAnimation(self)
-        glide.setDuration(400)
+        glide.setDuration(theme.GENTLE)
         glide.setEasingCurve(QEasingCurve.OutCubic)
         glide.setStartValue(self.share)
         glide.setEndValue(share)
@@ -526,9 +526,7 @@ class _Fold(QWidget):
         painter.setPen(QPen(c.edge if self.opened > 0.5 else c.border, 1))
         painter.drawPath(shape)
         glyph = QColor(theme.ON_ACCENT) if self.opened > 0.5 else c.text
-        painter.setPen(glyph)
-        painter.setFont(glyph_font(12))
-        painter.drawText(QRectF(self.rect()), Qt.AlignCenter, LEVELS)
+        draw_mark(painter, QRectF(self.rect()), LEVELS, glyph, 16)
         painter.end()
 
 
@@ -612,7 +610,7 @@ class _Pages(QWidget):
         new.setGeometry(way * width, 0, width, self.height())
         new.show()
         slide = self._slide = QVariantAnimation(self)
-        slide.setDuration(300)
+        slide.setDuration(theme.GENTLE)
         slide.setEasingCurve(QEasingCurve.OutCubic)
         slide.setStartValue(0.0)
         slide.setEndValue(1.0)
@@ -735,7 +733,7 @@ class EdgePanel(QWidget):
         stats_page = QWidget()
         stats = QVBoxLayout(stats_page)
         stats.setContentsMargins(0, 4, 0, 0)
-        stats.setSpacing(10)
+        stats.setSpacing(12)
         self.stat_rows = {key: _Stat(name, bar) for key, name, bar in (
             ('cpu', 'CPU', True), ('cpu_temp', 'CPU temp', False), ('ram', 'RAM', True), ('gpu', 'GPU', True),
             ('vram', 'VRAM', True), ('gpu_temp', 'GPU temp', False))}
@@ -767,7 +765,7 @@ class EdgePanel(QWidget):
         self._folding: QVariantAnimation | None = None
         layout.addWidget(self.screens)
         row = QHBoxLayout()
-        row.setSpacing(6)
+        row.setSpacing(8)
         row.addStretch(1)
         self.sound = SoundToggle()
         self.sound.setFixedSize(INNER - MicButton.SIZE - 6, MicButton.SIZE)

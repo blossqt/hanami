@@ -6,15 +6,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, Qt, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QProgressBar,
                                QPushButton, QToolButton, QVBoxLayout, QWidget)
 
 from .. import __version__, win32
 from ..catalog import SUITE
-from . import icons, theme
-from .settings import glyph_font
+from . import icons, suiteicons, theme
 from .sound import SoundToggle
 
 
@@ -93,7 +92,7 @@ class AppCard(QFrame):
         text.setSpacing(4)
         heading = QHBoxLayout()
         heading.setSpacing(8)
-        heading.addWidget(_serif(app.name, 14))
+        heading.addWidget(_serif(app.name, 13))
         self.version = _label('', 8.5, role='dim')
         heading.addWidget(self.version, 0, Qt.AlignBaseline)
         heading.addStretch(1)
@@ -119,7 +118,7 @@ class AppCard(QFrame):
         self.progress.hide()
         text.addWidget(self.progress)
         buttons = QHBoxLayout()
-        buttons.setSpacing(6)
+        buttons.setSpacing(8)
         self.open = QPushButton('Open')             # pink only as Install: Open and Start are routine
         self.open.clicked.connect(self._primary)
         self.update = QPushButton('Update')
@@ -245,6 +244,7 @@ class LauncherWindow(QWidget):
         self.setMinimumWidth(700)
         self.setObjectName('launcher')
         theme.frost(self, backdrop=theme.BACKDROP)
+        theme.closes_on_escape(self)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 20)
         layout.setSpacing(16)
@@ -260,8 +260,8 @@ class LauncherWindow(QWidget):
         top.addWidget(self.sound, 0, Qt.AlignVCenter)
         self.settings = QToolButton()
         self.settings.setObjectName('settingsButton')
-        self.settings.setText('')
-        self.settings.setFont(glyph_font(13))
+        self._settings_icon()
+        theme.on_restyle(self._settings_icon)
         self.settings.setToolTip('Settings')
         self.settings.setCursor(Qt.PointingHandCursor)
         self.settings.setFixedSize(38, 38)
@@ -296,6 +296,10 @@ class LauncherWindow(QWidget):
         layout.addWidget(self.foot)
         theme.restyle(self, self._style)
         self.show_hanami('')
+
+    def _settings_icon(self) -> None:
+        self.settings.setIcon(suiteicons.icon('gear', theme.colors().text, 18))
+        self.settings.setIconSize(QSize(18, 18))
 
     def show_hanami(self, newer: str, updating: str = '', can_update: bool = False, waiting: bool = False) -> None:
         """The footer: Hanami's version, and a newer one if there is one - to update to here (or,

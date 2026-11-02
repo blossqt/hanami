@@ -38,6 +38,7 @@ COPIES = {
     ROOT / 'app' / 'hanami' / 'suitetray.py': QT_APPS,
     ROOT / 'app' / 'hanami' / 'ui' / 'suitetheme.py': [app / 'ui' for app in QT_APPS],
     ROOT / 'app' / 'hanami' / 'ui' / 'suitesettings.py': [app / 'ui' for app in QT_APPS],
+    ROOT / 'app' / 'hanami' / 'ui' / 'suiteicons.py': [app / 'ui' for app in QT_APPS],
     ROOT / 'app' / 'hanami' / 'ui' / 'GeistSerif-Regular.ttf': [app / 'ui' for app in QT_APPS],
     ROOT / 'app' / 'hanami' / 'ui' / 'GeistSerif-OFL.txt': [app / 'ui' for app in QT_APPS],
     ROOT / 'app' / 'hanami' / 'suitelog.py': QT_APPS + [DOCUMENTS / 'homework-hub'],

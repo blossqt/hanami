@@ -38,7 +38,7 @@ from . import (APP_NAME, __version__, audio, brightness, catalog, installer, rel
 from .host import TrayHost
 from .hotkeys import Hotkeys, HotkeyError, normalize
 from .stats import Sampler
-from .ui import icons, pins, theme
+from .ui import icons, pins, suitesettings, theme
 from .ui.launcher import CardState, LauncherWindow, placeholder_icon
 from .ui.screentext import ScreenText
 from .ui.panel import BUTTONS, PAGES, TAB_LIMITS, TAB_LOOK, EdgePanel
@@ -1399,14 +1399,28 @@ class Controller(QObject):
         self.panel.winId()
         for pin in self.settings.pinned:
             self._pin_icon(pin)
-        self._make_window().winId()
+        window = self._make_window()
+        window.winId()
+        window.grab()                   # drawn once unseen: its first opening is then 0.2 s quicker
         if self.settings.text_hotkey_on:
             # Windows' text readers, made off the UI thread: the first screen read took 50 ms more.
             threading.Thread(target=suiteocr.available, daemon=True).start()
 
+    def _shortcut_groups(self) -> list:
+        """Hanami's keyboard shortcuts, for its sheet (Ctrl+/): the hotkeys as they are set now."""
+        s = self.settings
+        anywhere = [(s.sound_hotkey, 'Switch the sound output')] if s.sound_hotkey_on else []
+        if s.text_hotkey_on:
+            anywhere.append((s.text_hotkey, 'Copy text from the screen'))
+        return ([('Anywhere', anywhere)] if anywhere else []) + [
+            ('Copying text from the screen', [('Enter', 'Copy what is chosen'), ('Ctrl+A', 'Choose all of it'),
+                                              ('Esc', 'Stop')]),
+            ('In this window', [('Ctrl+/', 'These shortcuts'), ('Esc', 'Close the window')])]
+
     def _make_window(self) -> LauncherWindow:
         if self.window is None:
             self.window = LauncherWindow()
+            suitesettings.shortcut_sheet(self.window, 'Hanami', self._shortcut_groups)
             self.window.settings_clicked.connect(self.show_settings)
             self.window.open_app.connect(self.open_app)
             self.window.quit_app.connect(self.quit_app)

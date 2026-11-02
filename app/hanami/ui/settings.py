@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QCheckBox, QComboB
 from .. import __version__
 from ..catalog import SUITE
 from . import icons, suitesettings, suitetheme, theme
-from .suitesettings import glyph_font  # noqa: F401 - the icon font, for the launcher, panel and sound pop-up
+from .suitesettings import glyph_font  # noqa: F401 - the icon font, read once in the warm-up (app.py)
 
 SOURCE = 'https://github.com/blossqt/hanami'
 
@@ -144,7 +144,7 @@ class _LookTile(QAbstractButton):
             p.setBrush(Qt.NoBrush)
             p.drawPath(tick)
         p.setPen(c.text)
-        p.setFont(theme.font(10, QFont.DemiBold))
+        p.setFont(theme.font(10.5, QFont.DemiBold))
         p.drawText(QRectF(r.x() + 2, preview.bottom() + 6, r.width(), 20), Qt.AlignLeft | Qt.AlignVCenter, self.title)
         p.end()
 
@@ -168,8 +168,8 @@ class SettingsWindow(QWidget):
     show_page = Signal(str)
     open_url = Signal(str)
 
-    PAGES = [('', 'General'), ('', 'Edge panel'), ('', 'Appearance'), ('', 'Games'), ('', 'Sound'),
-             ('', 'Screen text'), ('', 'Updates'), ('', 'About')]
+    PAGES = [('gear', 'General'), ('sidebar', 'Edge panel'), ('palette', 'Appearance'), ('gamepad', 'Games'), ('speaker', 'Sound'),
+             ('scan', 'Screen text'), ('refresh', 'Updates'), ('info', 'About')]
 
     def __init__(self, start_with: list[str], starts_with_windows: bool, updates: tuple[bool, bool, bool],
                  sound: tuple[bool, str] = (True, ''), panel_edge: str = 'right',
@@ -180,6 +180,7 @@ class SettingsWindow(QWidget):
         self.setWindowTitle('Hanami settings')
         self.setWindowIcon(icons.app_icon())
         theme.frost(self, backdrop=theme.BACKDROP)
+        theme.closes_on_escape(self)
         frame = suitesettings.SettingsFrame(self, icons.render_app_icon(28))
         self.nav, self.pages = frame.nav, frame.pages
         made = [self._general(start_with, starts_with_windows),
@@ -245,7 +246,7 @@ class SettingsWindow(QWidget):
         self.panel_on.toggled.connect(self._panel_edited)
         box.addWidget(holder)
         row = QHBoxLayout()
-        row.setSpacing(6)
+        row.setSpacing(8)
         row.addWidget(_label('Edge:', 9.5))
         self.panel_edges = QButtonGroup(self)
         self.edge_buttons: dict[str, QPushButton] = {}
@@ -346,7 +347,7 @@ class SettingsWindow(QWidget):
         frame, box = _section('Shortcuts')
         self.pinned = pinned
         self._pin_rows = QVBoxLayout()
-        self._pin_rows.setSpacing(6)
+        self._pin_rows.setSpacing(8)
         box.addLayout(self._pin_rows)
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -383,7 +384,7 @@ class SettingsWindow(QWidget):
                                                 'follow what you choose here within a few seconds.')
         frame, box = _section('Light or dark')
         row = QHBoxLayout()
-        row.setSpacing(6)
+        row.setSpacing(8)
         self.modes = QButtonGroup(self)
         self.mode_buttons: dict[str, QPushButton] = {}
         for name, title in theme.MODES.items():
@@ -437,7 +438,7 @@ class SettingsWindow(QWidget):
         box.addWidget(holder)
         box.addWidget(_label('Grabbit’s downloads:', 9, role='dim'))
         row = QHBoxLayout()
-        row.setSpacing(6)
+        row.setSpacing(8)
         self.game_downloads = QButtonGroup(self)
         self.download_buttons: dict[str, QPushButton] = {}
         for name, title in theme.GAME_DOWNLOADS.items():
@@ -486,7 +487,7 @@ class SettingsWindow(QWidget):
         self.sound_on.toggled.connect(self._sound_edited)
         box.addWidget(holder)
         row = QHBoxLayout()
-        row.setSpacing(10)
+        row.setSpacing(12)
         row.addWidget(_label('Hotkey:', 9.5))
         self.sound_key = QKeySequenceEdit(QKeySequence(hotkey))
         self.sound_key.setMaximumSequenceLength(1)
@@ -513,7 +514,7 @@ class SettingsWindow(QWidget):
         self.text_on.toggled.connect(self._text_edited)
         box.addWidget(holder)
         row = QHBoxLayout()
-        row.setSpacing(10)
+        row.setSpacing(12)
         row.addWidget(_label('Hotkey:', 9.5))
         self.text_key = QKeySequenceEdit(QKeySequence(hotkey))
         self.text_key.setMaximumSequenceLength(1)
@@ -607,7 +608,7 @@ class SettingsWindow(QWidget):
         row.addWidget(logo, 0, Qt.AlignTop)
         words = QVBoxLayout()
         words.setSpacing(4)
-        words.addWidget(suitesettings.heading(f'Hanami {__version__}', 16))
+        words.addWidget(suitesettings.heading(f'Hanami {__version__}', 17))
         words.addWidget(_label('The suite’s launcher. It keeps one tray icon for every suite app, and installs and '
                                'updates them from their signed releases.', 9, role='dim', wrap=True))
         buttons = QHBoxLayout()
@@ -737,7 +738,7 @@ class SettingsWindow(QWidget):
             row = QWidget()
             line = QHBoxLayout(row)
             line.setContentsMargins(0, 0, 0, 0)
-            line.setSpacing(10)
+            line.setSpacing(12)
             icon = QLabel()
             icon.setPixmap(pins.icon(pin, 20, ratio))
             line.addWidget(icon)
