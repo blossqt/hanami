@@ -144,8 +144,8 @@ class AppCard(QFrame):
         self.dot.setFixedHeight(round(cap))          # as tall as the name's capitals, so centred on them
         corner.addWidget(self.dot, 0, Qt.AlignTop)
         self.more = QToolButton()
-        self.more.setText('⋯')
-        self.more.setFont(theme.font(13, QFont.Bold))
+        self._more_icon()                           # Lucide's ellipsis, not a ⋯ character
+        theme.on_restyle(self._more_icon)
         self.more.setPopupMode(QToolButton.InstantPopup)
         self.more.setCursor(Qt.PointingHandCursor)
         self.more.setToolTip('More')
@@ -221,6 +221,14 @@ class AppCard(QFrame):
         else:
             pixmap = placeholder_icon(self.app.name, 44)
         self.icon.setPixmap(pixmap)
+
+    def _more_icon(self) -> None:
+        try:
+            # heavier than the set's stroke: its dots are the whole drawing, as big as the ⋯ was
+            self.more.setIcon(suiteicons.icon('more', theme.colors().text, 20, 2.8))
+            self.more.setIconSize(QSize(20, 20))
+        except RuntimeError:                        # the card is gone
+            pass
 
     def show_state(self, s: CardState) -> None:
         """The card as the app is now - unchanged, nothing is done (it is asked every 2 s, and
