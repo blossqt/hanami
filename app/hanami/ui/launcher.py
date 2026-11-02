@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QProgressBar,
                                QPushButton, QToolButton, QVBoxLayout, QWidget)
 
@@ -18,14 +18,14 @@ from .sound import SoundToggle
 
 
 def _serif(text: str, size: float) -> QLabel:
-    """A name or title, in the suite's Geist Serif."""
-    label = QLabel(text)
+    """A name or title, in the suite's Geist Serif (its box its ink: theme.Label)."""
+    label = theme.Label(text)
     label.setFont(theme.serif(size))
     return label
 
 
 def _label(text: str, size: float, weight=QFont.Normal, role: str = '') -> QLabel:
-    label = QLabel(text)
+    label = theme.Label(text)
     label.setFont(theme.font(size, weight))
     if role:
         label.setProperty('role', role)
@@ -69,6 +69,40 @@ _BUSY = {'download': 'Downloading', 'unpack': 'Unpacking', 'check': 'Checking it
          'place': 'Putting it in place', 'quit': 'Waiting for it to quit', 'remove': 'Removing it'}
 
 
+
+class _Dot(QWidget):
+    """Whether the app runs, at the card's top right by its ⋯ (the user's wish, 2026-11-02, in
+    place of a "Running · in the tray" line): green while it runs, a ring while it doesn't, nothing
+    while it isn't on this PC. Its tooltip says it in words."""
+
+    SIZE = 8
+
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self.state: str | None = None
+
+    def set(self, state: str | None, words: str) -> None:
+        self.setToolTip(words)
+        self.setVisible(state is not None)
+        if state != self.state:
+            self.state = state
+            self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(0, (self.height() - self.SIZE) / 2, self.SIZE, self.SIZE)     # centred in its height
+        if self.state == 'running':
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor('#2f9e44'))
+        else:
+            p.setPen(QPen(QColor(theme.colors().dim), 1.6))
+            p.setBrush(Qt.NoBrush)
+        p.drawEllipse(r.adjusted(1, 1, -1, -1))         # 6 px, ring or not
+        p.end()
+
+
 class AppCard(QFrame):
     open_clicked = Signal(str)
     quit_clicked = Signal(str)
@@ -83,40 +117,65 @@ class AppCard(QFrame):
         self.app = app
         self.setObjectName('card')
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 16, 12, 16)
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(16)
         self.icon = QLabel()
         self.icon.setFixedSize(44, 44)
         layout.addWidget(self.icon, 0, Qt.AlignTop)
+        # The gaps the eye sees (Keytap\.dev\spacing\BRIEF.md), 16 between the name
+        # and what the app does and between that and the buttons (the user's wish: the same), 16
+        # padding all round. The buttons sit at the foot, so a row of cards has them on one line.
         text = QVBoxLayout()
-        text.setSpacing(4)
+        text.setSpacing(0)
         heading = QHBoxLayout()
         heading.setSpacing(8)
-        heading.addWidget(_serif(app.name, 13))
-        self.version = _label('', 8.5, role='dim')
-        heading.addWidget(self.version, 0, Qt.AlignBaseline)
+        name = _serif(app.name, 13)
+        heading.addWidget(name, 0, Qt.AlignTop)
+        self.version = _label('', theme.TYPE['caption'], role='dim')
+        # Centred on the name's capitals (the user's wish), not on its baseline: both boxes are their
+        # ink, the name's from the top of its capitals
+        cap = QFontMetricsF(name.font()).capHeight()
+        self.version.setContentsMargins(0, max(0, round((cap - QFontMetricsF(self.version.font()).capHeight()) / 2)), 0, 0)
+        heading.addWidget(self.version, 0, Qt.AlignTop)
         heading.addStretch(1)
+        corner = QHBoxLayout()                      # the dot right by the ⋯, which its own padding parts it from
+        corner.setSpacing(0)
+        self.dot = _Dot()
+        self.dot.setFixedHeight(round(cap))          # as tall as the name's capitals, so centred on them
+        corner.addWidget(self.dot, 0, Qt.AlignTop)
         self.more = QToolButton()
         self.more.setText('⋯')
         self.more.setFont(theme.font(13, QFont.Bold))
         self.more.setPopupMode(QToolButton.InstantPopup)
         self.more.setCursor(Qt.PointingHandCursor)
         self.more.setToolTip('More')
+        self.more.setFixedSize(28, round(cap))      # as tall as the name's capitals, centred on them;
+                                                    # as narrow as its dots, so the running dot sits by them
         self.menu = QMenu(self.more)
         self.more.setMenu(self.menu)
-        heading.addWidget(self.more, 0, Qt.AlignTop)
+        corner.addWidget(self.more, 0, Qt.AlignTop)
+        heading.addLayout(corner)
         text.addLayout(heading)
-        about = _label(app.description, 8.75, role='dim')
+        # The name centred on the icon beside it (the user: the titles sat too high)
+        text.setContentsMargins(0, max(0, round((self.icon.height() - cap) / 2)), 0, 0)
+        text.addSpacing(16)
+        about = _label(app.description, theme.TYPE['small'], role='dim')
         about.setWordWrap(True)
         text.addWidget(about)
-        self.state = _label('', 8.5)
+        self.status = QWidget()                     # only while there is something to say: an install, a problem
+        status = QVBoxLayout(self.status)
+        status.setContentsMargins(0, 16, 0, 0)
+        status.setSpacing(16)
+        self.state = _label('', theme.TYPE['caption'])
         self.state.setWordWrap(True)
-        text.addWidget(self.state)
+        status.addWidget(self.state)
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
         self.progress.setFixedHeight(6)
         self.progress.hide()
-        text.addWidget(self.progress)
+        status.addWidget(self.progress)
+        text.addWidget(self.status)
+        text.addStretch(1)                          # spare height above the buttons, never under
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
         self.open = QPushButton('Open')             # pink only as Install: Open and Start are routine
@@ -132,7 +191,7 @@ class AppCard(QFrame):
             button.setCursor(Qt.PointingHandCursor)
             buttons.addWidget(button)
         buttons.addStretch(1)
-        text.addSpacing(8)
+        text.addSpacing(16)
         text.addLayout(buttons)
         layout.addLayout(text, 1)
         self._exe = None
@@ -175,26 +234,25 @@ class AppCard(QFrame):
         self._show_icon(s.exe)
         self.version.setText(s.version or (s.latest if s.exe is None else ''))     # not here yet: the newest
         c = theme.colors()
-        dim, rose = c.dim.name(), theme.ink()
+        dim = c.dim.name()
         if s.busy:
             words = _BUSY.get(s.busy, s.busy) + '…'
             if s.busy == 'download' and s.total:
                 words = f'Downloading {s.latest}…  {s.done / 1e6:.0f} of {s.total / 1e6:.0f} MB'
             line = f'<span style="color:{dim}">{words}</span>'
-        elif s.exe is None:
-            line = f'<span style="color:{dim}">○</span>&nbsp; Not installed'
-        elif s.running:
-            line = '<span style="color:#2f9e44">●</span>&nbsp; Running' + (' · in the tray' if s.in_tray else '')
-        else:
-            line = f'<span style="color:{dim}">○</span>&nbsp; Not running'
-        if s.update and not s.busy:
-            line += f' · <span style="color:{rose}">{s.latest} is out</span>'
+        else:                                       # running or not: the dot on the icon (the user's wish,
+            line = ''                               # 2026-11-02); not installed or a new version: the buttons
         if s.problem and not s.busy:
-            line += f'<br><span style="color:{c.error.name()}">{s.problem}</span>'
+            line += f'<span style="color:{c.error.name()}">{s.problem}</span>'
         self.state.setText(line)
+        self.state.setVisible(bool(line))
+        self.dot.set(None if s.exe is None else 'running' if s.running else 'stopped',
+                     'Running, in the tray' if s.running and s.in_tray else 'Running' if s.running
+                     else 'Not running')
 
         busy = bool(s.busy)
         self.progress.setVisible(busy)
+        self.status.setVisible(bool(line) or busy)
         if busy:
             fraction = s.total > 0 and s.busy in ('download', 'unpack')
             self.progress.setRange(0, 1000 if fraction else 0)
@@ -246,7 +304,7 @@ class LauncherWindow(QWidget):
         theme.frost(self, backdrop=theme.BACKDROP)
         theme.closes_on_escape(self)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 20)
+        layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(16)
 
         top = QHBoxLayout()
@@ -270,7 +328,7 @@ class LauncherWindow(QWidget):
         layout.addLayout(top)
 
         grid = QGridLayout()
-        grid.setSpacing(12)
+        grid.setSpacing(16)                         # as from the header to the cards: even
         self.cards: dict[str, AppCard] = {}
         for index, app in enumerate(SUITE):
             card = AppCard(app)
@@ -289,7 +347,7 @@ class LauncherWindow(QWidget):
         layout.addLayout(grid)
         layout.addStretch(1)
 
-        self.foot = _label('', 8, role='dim')
+        self.foot = _label('', theme.TYPE['caption'], role='dim')
         self.foot.setTextFormat(Qt.RichText)
         self.foot.linkActivated.connect(lambda link: self.update_hanami.emit() if link == 'update'
                                         else self.show_page.emit('Hanami'))

@@ -144,7 +144,7 @@ class _LookTile(QAbstractButton):
             p.setBrush(Qt.NoBrush)
             p.drawPath(tick)
         p.setPen(c.text)
-        p.setFont(theme.font(10.5, QFont.DemiBold))
+        p.setFont(theme.text('strong', QFont.DemiBold))
         p.drawText(QRectF(r.x() + 2, preview.bottom() + 6, r.width(), 20), Qt.AlignLeft | Qt.AlignVCenter, self.title)
         p.end()
 
@@ -209,11 +209,12 @@ class SettingsWindow(QWidget):
                                        'It starts in the tray, without opening its window.',
                                        starts_with_windows)
         box.addWidget(holder)
-        box.addWidget(_label('Start with Hanami, in the background:', 9, role='dim'))
+        group, choices = suitesettings.group('Start with Hanami in the background')
+        box.addWidget(group)
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(24)
-        grid.setVerticalSpacing(6)
+        grid.setVerticalSpacing(8)
         self.start_with: dict[str, QCheckBox] = {}
         for index, app in enumerate(SUITE):
             check = QCheckBox(app.name)
@@ -223,12 +224,12 @@ class SettingsWindow(QWidget):
             self.start_with[app.name] = check
             grid.addWidget(check, index // 2, index % 2)
         grid.setColumnStretch(2, 1)
-        box.addLayout(grid)
+        choices.addLayout(grid)
         self.startup.toggled.connect(self._startup_edited)
         layout.addWidget(frame)
         frame, box = _section('The tray')
         box.addWidget(_label('Closing Hanami’s window keeps it in the tray, as the blossom. Its menu holds each running '
-                             'app’s own menu, and Quit Hanami.', 9, role='dim', wrap=True))
+                             'app’s own menu, and Quit Hanami.', suitesettings.SMALL, role='dim', wrap=True))
         layout.addWidget(frame)
         layout.addStretch(1)
         return page
@@ -247,7 +248,7 @@ class SettingsWindow(QWidget):
         box.addWidget(holder)
         row = QHBoxLayout()
         row.setSpacing(8)
-        row.addWidget(_label('Edge:', 9.5))
+        row.addWidget(_label('Edge'))
         self.panel_edges = QButtonGroup(self)
         self.edge_buttons: dict[str, QPushButton] = {}
         for name, title in (('left', 'Left'), ('right', 'Right')):
@@ -292,7 +293,7 @@ class SettingsWindow(QWidget):
                                                  brightness_on)
         self.brightness_switch.toggled.connect(self.brightness_changed)
         box.addWidget(holder)
-        self.monitors_found = _label('Looking for monitors…', 9, role='dim', wrap=True)
+        self.monitors_found = _label('Looking for monitors…', suitesettings.SMALL, role='dim', wrap=True)
         _indent(self.monitors_found)
         self.monitors_found.setVisible(brightness_on)
         self.brightness_switch.toggled.connect(self.monitors_found.setVisible)
@@ -301,11 +302,11 @@ class SettingsWindow(QWidget):
         frame, box = _section('CPU temperature')
         box.addWidget(_label('Windows doesn’t give apps the processor’s temperature. Hanami Sensors reads it '
                              'through PawnIO, as FanControl does: a small service that runs only while the stats '
-                             'page is in sight. Installing it asks for administrator permission.', 9, role='dim',
+                             'page is in sight. Installing it asks for administrator permission.', suitesettings.SMALL, role='dim',
                              wrap=True))
         row = QHBoxLayout()
         row.setSpacing(8)
-        self.sensors_status = _label('', 9.5)
+        self.sensors_status = _label('')
         row.addWidget(self.sensors_status, 1)
         self.sensors_install = QPushButton('Install')
         self.sensors_install.clicked.connect(lambda: self.sensors_asked.emit('--install'))
@@ -315,15 +316,15 @@ class SettingsWindow(QWidget):
             button.setCursor(Qt.PointingHandCursor)
             row.addWidget(button)
         box.addLayout(row)
-        self.sensors_problem = _label('', 8.5, role='dim', wrap=True)
+        self.sensors_problem = _label('', suitesettings.SMALL, role='dim', wrap=True)
         self.sensors_problem.hide()
         box.addWidget(self.sensors_problem)
         layout.addWidget(frame)
         frame, box = _section('Tab')
         grid = QGridLayout()
-        grid.setContentsMargins(0, 4, 0, 0)
+        grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(6)
+        grid.setVerticalSpacing(suitesettings.ITEMS)
         self.tab_sliders: dict[str, QSlider] = {}
         for index, (name, title, unit, value, (least, most)) in enumerate(zip(
                 ('length', 'thickness', 'opacity'), ('Tab length', 'Tab thickness', 'Tab opacity'),
@@ -333,11 +334,11 @@ class SettingsWindow(QWidget):
             slider.setValue(value)
             slider.setCursor(Qt.PointingHandCursor)
             slider.setAccessibleName(title)
-            shown = _label(f'{value}{unit}', 9.5, role='dim')
+            shown = _label(f'{value}{unit}', role='dim')
             shown.setMinimumWidth(48)
             slider.valueChanged.connect(lambda v, shown=shown, unit=unit: (shown.setText(f'{v}{unit}'),
                                                                            self._tab_edited()))
-            grid.addWidget(_label(title, 9.5), index, 0)
+            grid.addWidget(_label(title), index, 0)
             grid.addWidget(slider, index, 1)
             grid.addWidget(shown, index, 2)
             self.tab_sliders[name] = slider
@@ -371,7 +372,7 @@ class SettingsWindow(QWidget):
         row.addWidget(self.address, 1)
         row.addWidget(self.add_site)
         box.addLayout(row)
-        self.pin_note = _label('', 8.5, role='dim', wrap=True)
+        self.pin_note = _label('', suitesettings.SMALL, role='dim', wrap=True)
         box.addWidget(self.pin_note)
         self._show_pinned()
         self._panel_edited(emit=False)
@@ -417,7 +418,7 @@ class SettingsWindow(QWidget):
         box.addLayout(tiles)
         if not theme.glass_on():
             box.addWidget(_label('Glass needs Windows 11 with transparency effects on (Settings > Personalisation > '
-                                 'Colours).', 8.5, role='dim', wrap=True))
+                                 'Colours).', suitesettings.SMALL, role='dim', wrap=True))
         layout.addWidget(frame)
 
         frame, box = _section('Motion')
@@ -436,7 +437,8 @@ class SettingsWindow(QWidget):
                                           'the glass stops updating.', theme.game_quiet_chosen())
         self.game_quiet.toggled.connect(self._game_edited)
         box.addWidget(holder)
-        box.addWidget(_label('Grabbit’s downloads:', 9, role='dim'))
+        group, choices = suitesettings.group('Grabbit’s downloads')
+        box.addWidget(group)
         row = QHBoxLayout()
         row.setSpacing(8)
         self.game_downloads = QButtonGroup(self)
@@ -451,11 +453,11 @@ class SettingsWindow(QWidget):
             self.download_buttons[name] = button
         row.addWidget(suitesettings.Segmented(list(self.download_buttons.values())))
         row.addStretch(1)
-        box.addLayout(row)
-        box.addWidget(_label('Slowed down, they take at most 1 MB/s down and 64 KB/s up.', 8.5, role='dim', wrap=True))
-        box.addSpacing(4)
+        choices.addLayout(row)
+        box.addWidget(_label('Slowed down, they take at most 1 MB/s down and 64 KB/s up.', suitesettings.SMALL,
+                             role='dim', wrap=True))
         box.addWidget(_label('A game counts when Windows knows it as one, as Game Bar does, and its window fills the '
-                             'screen.', 8.5, role='dim', wrap=True))
+                             'screen.', suitesettings.SMALL, role='dim', wrap=True))
         self._game_edited(theme.game_quiet_chosen(), save=False)
         layout.addWidget(frame)
         layout.addStretch(1)
@@ -469,26 +471,25 @@ class SettingsWindow(QWidget):
         grid.setHorizontalSpacing(12)
         grid.setVerticalSpacing(8)
         self.output_choices: dict[str, QComboBox] = {}
-        for row, (which, title) in enumerate((('speakers', 'Speakers:'), ('headphones', 'Headphones:'))):
+        for row, (which, title) in enumerate((('speakers', 'Speakers'), ('headphones', 'Headphones'))):
             combo = QComboBox()
             combo.setMinimumWidth(320)
             combo.setCursor(Qt.PointingHandCursor)
             combo.currentIndexChanged.connect(lambda _, w=which: self._output_edited(w))
             self.output_choices[which] = combo
-            grid.addWidget(_label(title, 9.5), row, 0)
+            grid.addWidget(_label(title), row, 0)
             grid.addWidget(combo, row, 1)
         grid.setColumnStretch(2, 1)
         box.addLayout(grid)
-        box.addWidget(_label('The switch at the top of Hanami’s window goes between these two.', 8.5, role='dim',
+        box.addWidget(_label('The switch at the top of Hanami’s window goes between these two.', suitesettings.SMALL, role='dim',
                              wrap=True))
-        box.addSpacing(6)
         holder, self.sound_on = _switch('Switch between them with a hotkey', 'A pop-up names the output it went '
                                         'to.', on)
         self.sound_on.toggled.connect(self._sound_edited)
         box.addWidget(holder)
         row = QHBoxLayout()
         row.setSpacing(12)
-        row.addWidget(_label('Hotkey:', 9.5))
+        row.addWidget(_label('Hotkey'))
         self.sound_key = QKeySequenceEdit(QKeySequence(hotkey))
         self.sound_key.setMaximumSequenceLength(1)
         self.sound_key.setClearButtonEnabled(True)
@@ -499,7 +500,7 @@ class SettingsWindow(QWidget):
         row.addWidget(self.sound_key)
         row.addStretch(1)
         box.addLayout(row)
-        self.sound_problem = _label('', 9, role='error', wrap=True)
+        self.sound_problem = _label('', suitesettings.SMALL, role='error', wrap=True)
         self.sound_problem.hide()
         box.addWidget(self.sound_problem)
         layout.addWidget(frame)
@@ -515,7 +516,7 @@ class SettingsWindow(QWidget):
         box.addWidget(holder)
         row = QHBoxLayout()
         row.setSpacing(12)
-        row.addWidget(_label('Hotkey:', 9.5))
+        row.addWidget(_label('Hotkey'))
         self.text_key = QKeySequenceEdit(QKeySequence(hotkey))
         self.text_key.setMaximumSequenceLength(1)
         self.text_key.setClearButtonEnabled(True)
@@ -525,7 +526,7 @@ class SettingsWindow(QWidget):
         row.addWidget(self.text_key)
         row.addStretch(1)
         box.addLayout(row)
-        self.text_problem = _label('', 9, role='error', wrap=True)
+        self.text_problem = _label('', suitesettings.SMALL, role='error', wrap=True)
         self.text_problem.hide()
         box.addWidget(self.text_problem)
         layout.addWidget(frame)
@@ -584,7 +585,7 @@ class SettingsWindow(QWidget):
         self.check_button.setCursor(Qt.PointingHandCursor)
         self.check_button.clicked.connect(self.check_now)
         row.addWidget(self.check_button)
-        self.checked = _label('', 9, role='dim')
+        self.checked = _label('', suitesettings.SMALL, role='dim')
         row.addWidget(self.checked, 1)
         self.update_now = QPushButton('Update Hanami')
         self.update_now.setProperty('role', 'primary')
@@ -603,14 +604,14 @@ class SettingsWindow(QWidget):
         frame, box = _section('Hanami')
         row = QHBoxLayout()
         row.setSpacing(16)
-        logo = QLabel()
+        logo = theme.Label()
         logo.setPixmap(icons.render_app_icon(64))
         row.addWidget(logo, 0, Qt.AlignTop)
         words = QVBoxLayout()
         words.setSpacing(4)
         words.addWidget(suitesettings.heading(f'Hanami {__version__}', 17))
         words.addWidget(_label('The suite’s launcher. It keeps one tray icon for every suite app, and installs and '
-                               'updates them from their signed releases.', 9, role='dim', wrap=True))
+                               'updates them from their signed releases.', suitesettings.SMALL, role='dim', wrap=True))
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
         notes = QPushButton('Release notes')
@@ -621,18 +622,18 @@ class SettingsWindow(QWidget):
             button.setCursor(Qt.PointingHandCursor)
             buttons.addWidget(button)
         buttons.addStretch(1)
-        words.addSpacing(6)
+        words.addSpacing(16)                        # text, then its buttons: even
         words.addLayout(buttons)
         row.addLayout(words, 1)
         box.addLayout(row)
         layout.addWidget(frame)
         frame, box = _section('Thanks')
-        self.credit = _label('', 9, role='dim', wrap=True)
+        self.credit = _label('', suitesettings.SMALL, role='dim', wrap=True)
         self.credit.setTextFormat(Qt.RichText)
         self.credit.setOpenExternalLinks(True)
         self._show_credit()
         box.addWidget(self.credit)
-        box.addWidget(_label('MIT licence · made by blossqt', 8.5, role='dim'))
+        box.addWidget(_label('MIT licence · made by blossqt', suitesettings.SMALL, role='dim'))
         layout.addWidget(frame)
         layout.addStretch(1)
         return page
@@ -739,11 +740,11 @@ class SettingsWindow(QWidget):
             line = QHBoxLayout(row)
             line.setContentsMargins(0, 0, 0, 0)
             line.setSpacing(12)
-            icon = QLabel()
+            icon = theme.Label()
             icon.setPixmap(pins.icon(pin, 20, ratio))
             line.addWidget(icon)
-            line.addWidget(_label(pin.name, 9.5))
-            where = _label('', 8.5, role='dim')
+            line.addWidget(_label(pin.name))
+            where = _label('', suitesettings.SMALL, role='dim')
             where.setText(QFontMetrics(where.font()).elidedText(pin.target, Qt.ElideMiddle, 300))
             line.addWidget(where, 1)
             remove = QPushButton('Remove')
@@ -753,7 +754,7 @@ class SettingsWindow(QWidget):
             line.addWidget(remove)
             self._pin_rows.addWidget(row)
         if not self.pinned:
-            self._pin_rows.addWidget(_label('No shortcuts yet.', 9, role='dim'))
+            self._pin_rows.addWidget(_label('No shortcuts yet.', suitesettings.SMALL, role='dim'))
         room = len(self.pinned) < pins.MOST
         for widget in (self.add_file, self.add_folder, self.address, self.add_site):
             widget.setEnabled(room and self.panel_on.isChecked())

@@ -363,7 +363,7 @@ class _Stat(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         line = QRectF(0, 0, self.width(), 18)
-        painter.setFont(theme.font(8.5))
+        painter.setFont(theme.font(9))
         painter.setPen(c.dim)
         painter.drawText(line, Qt.AlignLeft | Qt.AlignVCenter, self.name)
         painter.setFont(theme.font(9.5, QFont.DemiBold))
@@ -454,7 +454,7 @@ class _Level(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         line = QRectF(0, 0, self.width(), 18)
-        painter.setFont(theme.font(8.5))
+        painter.setFont(theme.font(9))
         painter.setPen(c.dim)
         room, name = self.width() - 34, self.name
         if painter.fontMetrics().horizontalAdvance(name) > room and ' ' in name.strip():
