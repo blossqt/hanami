@@ -121,7 +121,7 @@ class AppCard(QFrame):
         layout.setSpacing(16)
         self.icon = QLabel()
         self.icon.setFixedSize(44, 44)
-        layout.addWidget(self.icon, 0, Qt.AlignTop)
+        layout.addWidget(self.icon, 0, Qt.AlignVCenter)   # centred on the card's name, words and buttons (the user's wish)
         # The gaps the eye sees (Keytap\.dev\spacing\BRIEF.md), 16 between the name
         # and what the app does and between that and the buttons (the user's wish: the same), 16
         # padding all round. The buttons sit at the foot, so a row of cards has them on one line.
@@ -156,8 +156,6 @@ class AppCard(QFrame):
         corner.addWidget(self.more, 0, Qt.AlignTop)
         heading.addLayout(corner)
         text.addLayout(heading)
-        # The name centred on the icon beside it (the user: the titles sat too high)
-        text.setContentsMargins(0, max(0, round((self.icon.height() - cap) / 2)), 0, 0)
         text.addSpacing(16)
         about = _label(app.description, theme.TYPE['small'], role='dim')
         about.setWordWrap(True)
