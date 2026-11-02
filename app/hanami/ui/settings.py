@@ -608,7 +608,7 @@ class SettingsWindow(QWidget):
         logo.setPixmap(icons.render_app_icon(64))
         row.addWidget(logo, 0, Qt.AlignTop)
         words = QVBoxLayout()
-        words.setSpacing(4)
+        words.setSpacing(16)                        # title, text and buttons evenly apart, as on the cards
         words.addWidget(suitesettings.heading(f'Hanami {__version__}', 17))
         words.addWidget(_label('The suite’s launcher. It keeps one tray icon for every suite app, and installs and '
                                'updates them from their signed releases.', suitesettings.SMALL, role='dim', wrap=True))
@@ -622,7 +622,6 @@ class SettingsWindow(QWidget):
             button.setCursor(Qt.PointingHandCursor)
             buttons.addWidget(button)
         buttons.addStretch(1)
-        words.addSpacing(16)                        # text, then its buttons: even
         words.addLayout(buttons)
         row.addLayout(words, 1)
         box.addLayout(row)
