@@ -50,6 +50,7 @@ STATS_QUICK = 250, 2.0  # ms between samples, for the first s of it: so the proc
                         # shows as soon as Hanami Sensors has it, when it has just been started
 SET_HELD = 2.0          # s after a brightness slider is moved during which a reading doesn't move it back
                         # (the reading may be from before)
+SETTLE_OVERSHOOT = 0.6     # the liquid panel's slide out: how far past its place it goes (about 2.5%)
 FOLD_MS = theme.STEADY           # the volume and brightness sliders dropping down, or folding away
 LEVELS = 'sliders'           # the suite's icon of two sliders, for the volume and brightness
 WHEEL_STEP = 2          # % a slider moves for each notch of the scroll wheel over it
@@ -1196,7 +1197,14 @@ class EdgePanel(QWidget):
         self.move(start)
         self.setWindowOpacity(0.0)
         self.show()
-        self._slide(start, rest, 260, QEasingCurve.OutBack if theme.look() == 'liquid' else QEasingCurve.OutCubic)
+        if theme.look() == 'liquid':
+            # a soft settle, past its place by a pixel or two: the default overshoot (1.7, about a
+            # tenth of the way) bounced it too much (2026-11-01, the user)
+            settle = QEasingCurve(QEasingCurve.OutBack)
+            settle.setOvershoot(SETTLE_OVERSHOOT)
+            self._slide(start, rest, theme.GENTLE, settle)
+        else:
+            self._slide(start, rest, 260, QEasingCurve.OutCubic)
 
     def slide_away(self) -> None:
         if not self.isVisible() or self._leaving:
