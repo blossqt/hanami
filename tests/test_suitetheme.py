@@ -392,6 +392,70 @@ class RimTests(unittest.TestCase):
         self.assertGreater(image.pixelColor(150, 0).alpha(), image.pixelColor(150, 5).alpha(), 'fading inwards')
         self.assertEqual(image.pixelColor(150, 100).alpha(), 0, 'nothing in the middle')
 
+    def test_the_rims_light_stretched_from_its_piece_is_the_light_drawn_whole(self):
+        for width, height, top in ((300, 200, 0.5), (411, 287, 0.5 - suitetheme._ABOVE)):
+            window = QWidget()
+            window.resize(width, height)
+            edge = QRectF(0.5, top, width - 1, height - 0.5 - top)
+            whole = QPixmap(width, height)
+            whole.fill(Qt.transparent)
+            p = QPainter(whole)
+            p.setRenderHint(QPainter.Antialiasing)
+            suitetheme._rim_glow(p, edge, 8, 120, 80)
+            suitetheme._edge_light(p, edge, 8, 120, 245, 1.3)
+            p.end()
+            stretched = QPixmap(width, height)
+            stretched.fill(Qt.transparent)
+            p = QPainter(stretched)
+            suitetheme._draw_rim_light(p, window, edge, 8, 120, (80, 245))
+            p.end()
+            self.assertEqual(stretched.toImage(), whole.toImage(), (width, height))
+
+    def test_a_dragged_windows_rim_is_drawn_again_at_most_every_few_ms(self):
+        window = QWidget()
+        drawn = []
+        with mock.patch.object(suitetheme, '_update_rim', lambda w: drawn.append(time.perf_counter())):
+            for _ in range(20):                 # a drag: many moves at once
+                suitetheme._rim_soon(window)
+            self.assertEqual(len(drawn), 1, 'the first at once, the rest held')
+            _wait(suitetheme._RIM_EVERY * 3)
+            self.assertEqual(len(drawn), 2, 'and the last one drawn once the wait is over')
+            self.assertGreaterEqual((drawn[1] - drawn[0]) * 1000, suitetheme._RIM_EVERY - 1)
+
+
+class SmoothResizeTests(unittest.TestCase):
+    def test_a_stack_of_pages_answers_for_its_page_in_sight_only(self):
+        pages = suitetheme.Pages()
+        tall, short = QWidget(), QWidget()
+        for page, height in ((tall, 900), (short, 100)):
+            QVBoxLayout(page).addWidget(_Tall(height))
+            pages.addWidget(page)
+        pages.setCurrentWidget(short)
+        own = short.layout().totalHeightForWidth(300)               # its words and its margins
+        self.assertLess(own, 200)
+        self.assertEqual(pages.layout().heightForWidth(300), own, 'the hidden tall page left out')
+        self.assertEqual(tall.heightForWidth(300), -1)
+        pages.setCurrentWidget(tall)
+        self.assertGreater(pages.layout().heightForWidth(300), 900)
+
+    def test_colours_are_kept_not_made_on_every_ask(self):
+        self.assertIs(suitetheme.colors(), suitetheme.colors())
+
+
+class _Tall(QWidget):
+    def __init__(self, height: int):
+        super().__init__()
+        self._height = height
+        policy = self.sizePolicy()
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return self._height
+
 
 def _wait(ms: int) -> None:
     loop = QEventLoop()
