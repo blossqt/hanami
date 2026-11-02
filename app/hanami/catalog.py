@@ -40,17 +40,17 @@ class SuiteApp:
 
 
 SUITE = (
-    SuiteApp('Keytap', 'Types your Bitwarden logins into any app.', 'Keytap.exe',
+    SuiteApp('Keytap', 'Types Bitwarden logins into Windows programs with a hotkey.', 'Keytap.exe',
              _DOCUMENTS / 'Keytap' / 'dist' / 'Keytap' / 'Keytap.exe',
              'blossqt/keytap', '080b0717166ed42a3eca16c1ebf1d6b9229114a08479c3082691a854d2d08b05',
              startup_args=('--startup',)),
-    SuiteApp('Dropshift', 'Drag a file, press a key, drop it on what it should become.', 'Dropshift.exe',
+    SuiteApp('Dropshift', 'Converts and edits files from a menu that opens mid-drag.', 'Dropshift.exe',
              _DOCUMENTS / 'Dropshift' / 'dist' / 'Dropshift' / 'Dropshift.exe',
              'blossqt/dropshift', '2805973de0b5ac4baf04e1712bd4143b84fd532d2e03cdec6cfa6f2d929e4f6f'),
-    SuiteApp('Grabbit', 'Paste a link - video, post, magnet or file - and it downloads.', 'Grabbit.exe',
+    SuiteApp('Grabbit', 'Downloads videos, photo posts, torrents and files from links.', 'Grabbit.exe',
              _DOCUMENTS / 'Grabbit' / 'dist' / 'Grabbit' / 'Grabbit.exe',
              'blossqt/grabbit', '73c12e6787d3b5271ef6e3d3cca0a3e63c9c1aae998c5e390e94ef367b0e7c20'),
-    SuiteApp('Homework Hub', 'Every assignment due, from every course site, in one list.', 'HomeworkHub.exe',
+    SuiteApp('Homework Hub', 'Lists assignments due on Brightspace, Gradescope and Pearson MyLab.', 'HomeworkHub.exe',
              _DOCUMENTS / 'homework-hub' / 'dist' / 'HomeworkHub.exe',
              'blossqt/homework-hub-releases', 'd7cfd2d285134baa76c7a45512b9d04ccb63601364bbaff1f7898c3eba479b20',
              release_name='HomeworkHub', single_exe=True, self_test=False, startup_args=('--no-window',)),

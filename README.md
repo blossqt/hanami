@@ -1,8 +1,8 @@
 # Hanami
 
-The suite's launcher and installer, and the one tray icon its apps share.
-Hanami (花見) is the custom of gathering under the cherry blossoms; this gathers
-Keytap, Dropshift, Grabbit and Homework Hub under one.
+The suite's launcher and installer, and the one tray icon its apps share:
+Keytap, Dropshift, Grabbit and Homework Hub. The name (花見) is Japanese for
+cherry-blossom viewing.
 
 ## Getting started
 
