@@ -274,7 +274,10 @@ class AppCard(QFrame):
             self.open.style().polish(self.open)
         self.open.setEnabled(not s.starting)
         self.open.setVisible(not busy)
-        self.update.setText(f'Update to {s.latest}')
+        # 'Update to 0.2.36' didn't fit beside Open and Quit on a laptop's narrower cards, and was cut
+        # at both ends: the button says Update, and its tooltip which version
+        self.update.setText('Update')
+        self.update.setToolTip(f'Update to {s.latest}' if s.latest else '')
         self.update.setVisible(s.update and not busy)
         self.quit.setVisible(s.in_tray and not busy)
         self.cancel.setVisible(busy and s.busy in ('download', 'unpack', 'quit'))

@@ -1,4 +1,4 @@
 """Hanami: the suite's launcher, and the one tray icon its apps share."""
 
-__version__ = "0.1.60"
+__version__ = "0.1.61"
 APP_NAME = "Hanami"
