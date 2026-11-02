@@ -590,9 +590,10 @@ class SelfUpdateTests(_Controlled):
         try:
             self.assertTrue(window.update_now.isVisibleTo(window), 'a newer Hanami: the button to put it in')
             self.assertEqual(window.update_now.text(), 'Update to 9.9.9 now')
+            window.isActiveWindow = lambda: True               # in front: being used
             self.controller._auto_update()
             self.settle(lambda: self.controller._staged_self is not None)
-            self.assertEqual(self.started, [], 'by itself, it waits while Settings is open')
+            self.assertEqual(self.started, [], 'by itself, it waits while Settings is in use')
             self.assertTrue(self.controller._hand_over_timer.isActive())
             window.update_now.click()
             self.assertEqual(len(self.started), 1, 'asked: it goes in at once, Settings open or not')
@@ -600,6 +601,29 @@ class SelfUpdateTests(_Controlled):
             self.assertEqual(self.prepared, ['9.9.9'], 'what was fetched already, not fetched again')
         finally:
             window.close()
+
+    def test_open_but_not_in_use_it_goes_ahead_and_they_come_back(self):
+        """A window open behind another doesn't hold the update up (until 0.1.63 it did, for as long
+        as it stayed open); it comes back after the restart, behind what is in front."""
+        self.controller._make_window().show()             # (show_window is a stand-in here)
+        self.controller.show_settings('Sound')
+        self.controller.window.isActiveWindow = lambda: False
+        self.controller.settings_window.isActiveWindow = lambda: False
+        self.controller._auto_update()
+        self.settle(lambda: self.started)
+        self.assertEqual(len(self.started), 1, 'not waiting for the windows to close')
+        self.assertEqual(self.started[0][-2:], ['--reopen', 'window,settings:Sound'])
+        self.controller.window.close()
+        self.controller.settings_window.close()
+        self.controller._reopen('window,settings:Sound')
+        try:
+            self.assertTrue(self.controller.window.isVisible())
+            self.assertTrue(self.controller.settings_window.isVisible())
+            self.assertEqual(self.controller.settings_window.pages.currentIndex(),
+                             [title for _, title in SettingsWindow.PAGES].index('Sound'), 'on the page it was on')
+        finally:
+            self.controller.window.close()
+            self.controller.settings_window.close()
 
     def test_asked_while_it_is_still_being_fetched(self):
         self.controller.panel.show()

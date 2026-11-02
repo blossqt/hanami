@@ -28,7 +28,7 @@ import time
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QSettings, QTimer, QUrl, Signal
+from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QSettings, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QFont, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
@@ -380,9 +380,10 @@ class _AudioPoll:
 
 
 class Controller(QObject):
-    def __init__(self, startup: bool, updated: str = '', failed: str = ''):
+    def __init__(self, startup: bool, updated: str = '', failed: str = '', reopen: str = ''):
         """Started at sign-in (startup), or by an update that just put this version in (updated:
-        the version) or failed to and left this one (failed: the version that didn't go in)."""
+        the version) or failed to and left this one (failed: the version that didn't go in). After
+        an update, reopen names the windows that were open ('window', 'settings:<page>')."""
         super().__init__()
         self.settings = Settings()
         self.host = TrayHost(self)
@@ -476,6 +477,8 @@ class Controller(QObject):
             QTimer.singleShot(2500, self._start_chosen)         # whenever Hanami starts, not only at sign-in
         if not startup and not DEV and not restarted:
             self.show_window()
+        if reopen:
+            QTimer.singleShot(0, lambda: self._reopen(reopen))
         if updated:
             self._say('Hanami', f'Hanami is updated to {updated}.', icons.app_icon(), 4000)
             win32.icon_changed(Path(sys.executable), win32.start_menu() / 'Hanami.lnk')
@@ -1061,9 +1064,36 @@ class Controller(QObject):
 
     def _in_use(self) -> bool:
         """Whether a restart now would be in the way: a game or anything full screen in front, a
-        window of Hanami's or its panel open, or an app being installed."""
-        open_ = [w for w in (self.window, self.settings_window, self.panel) if w is not None and w.isVisible()]
-        return bool(theme.quiet_now() or win32.fullscreen_in_front() or open_ or self.jobs)
+        window of Hanami's in front (being used), its panel out, or an app being installed. An open
+        window that isn't in front doesn't hold it up: it comes back after the restart (_reopen).
+        Until 0.1.63 any open window did, and the update waited for as long as one stayed open."""
+        used = [w for w in (self.window, self.settings_window) if w is not None and w.isVisible() and w.isActiveWindow()]
+        panel_out = self.panel is not None and self.panel.isVisible()
+        return bool(theme.quiet_now() or win32.fullscreen_in_front() or used or panel_out or self.jobs)
+
+    def _open_windows(self) -> str:
+        """The windows open now, for the restarted Hanami to open again: 'window,settings:Sound'."""
+        names = []
+        if self.window is not None and self.window.isVisible():
+            names.append('window')
+        if self.settings_window is not None and self.settings_window.isVisible():
+            index = self.settings_window.pages.currentIndex()
+            names.append('settings:' + SettingsWindow.PAGES[index][1] if 0 <= index < len(SettingsWindow.PAGES)
+                         else 'settings')
+        return ','.join(names)
+
+    def _reopen(self, which: str) -> None:
+        """Open again the windows that were open before an update's restart, where they were, behind
+        whatever is in front now: they don't take the focus."""
+        for name in which.split(','):
+            if name == 'window':
+                self._make_window()
+                self._update_window()
+                self.window.setAttribute(Qt.WA_ShowWithoutActivating, True)
+                self.window.show()
+                self.window.setAttribute(Qt.WA_ShowWithoutActivating, False)
+            elif name.startswith('settings'):
+                self.show_settings(name.partition(':')[2], activate=False)
 
     def _try_hand_over(self) -> None:
         if self._staged_self is not None and not self._in_use():
@@ -1074,9 +1104,11 @@ class Controller(QObject):
         (finish_update) - then quit."""
         staged, self._staged_self = self._staged_self, None
         self._hand_over_timer.stop()
+        reopen = self._open_windows()
         try:
             subprocess.Popen([str(staged / catalog.HANAMI.exe_name), '--finish-update', str(installer.own_folder()),
-                              str(os.getpid())], cwd=str(staged), env=installer.clean_environment(),
+                              str(os.getpid()), *(['--reopen', reopen] if reopen else [])],
+                             cwd=str(staged), env=installer.clean_environment(),
                              creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
         except OSError as error:
             installer.throw_away(staged)
@@ -1460,7 +1492,7 @@ class Controller(QObject):
         if self.settings.check_updates and self._checked_at and time.monotonic() - self._checked_at > CHECK_AGAIN:
             self.check_releases()
 
-    def show_settings(self, page: str = '') -> None:
+    def show_settings(self, page: str = '', activate: bool = True) -> None:
         if self.settings_window is None:
             s = self.settings
             self.settings_window = SettingsWindow(s.start_with, win32.starts_with_windows(),
@@ -1501,6 +1533,11 @@ class Controller(QObject):
         self.settings_window.show_text_problem(self.text_problem)
         self._show_checked()
         self._show_hanami_update()
+        if not activate:                            # reopened after an update: behind what is in front
+            self.settings_window.setAttribute(Qt.WA_ShowWithoutActivating, True)
+            self.settings_window.show()
+            self.settings_window.setAttribute(Qt.WA_ShowWithoutActivating, False)
+            return
         self.settings_window.show()
         self.settings_window.raise_()
         self.settings_window.activateWindow()
@@ -1684,8 +1721,9 @@ def finish_update(argv: list[str]) -> int:
     except releases.ReleaseError:
         traceback.print_exc()
         said = ['--update-failed', __version__]
+    reopen = ['--reopen', _after(argv, '--reopen')] if _after(argv, '--reopen') else []
     if '--no-restart' not in argv:
-        subprocess.Popen([str(home / catalog.HANAMI.exe_name), *said], cwd=str(home),
+        subprocess.Popen([str(home / catalog.HANAMI.exe_name), *said, *reopen], cwd=str(home),
                          env=installer.clean_environment(),
                          creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
     return 0 if said[0] == '--updated' else 1
@@ -1726,7 +1764,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     controller = Controller(startup='--startup' in argv, updated=_after(argv, '--updated'),
-                            failed=_after(argv, '--update-failed'))
+                            failed=_after(argv, '--update-failed'), reopen=_after(argv, '--reopen'))
     if not controller.host.listening:
         QMessageBox.warning(None, 'Hanami', 'Hanami could not open its tray link; the apps will keep '
                             'their own icons.')
