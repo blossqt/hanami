@@ -334,12 +334,14 @@ class _Stat(QWidget):
         super().__init__()
         self.name, self.bar = name, bar
         self.value, self.share = '–', 0.0
+        self._figures = theme.Rolling(self, '–')       # its value rolls to each new one, an odometer's digits
         self._glide: QVariantAnimation | None = None
         self.setFixedSize(INNER, 30 if bar else 20)
         self.setAccessibleName(name)
 
     def set_value(self, value: str, share: float | None = None) -> None:
         self.value = value
+        self._figures.set(value)
         self.setAccessibleDescription(value)
         if share is None or not self.bar:
             self.update()
@@ -368,7 +370,7 @@ class _Stat(QWidget):
         painter.drawText(line, Qt.AlignLeft | Qt.AlignVCenter, self.name)
         painter.setFont(theme.font(9.5, QFont.DemiBold))
         painter.setPen(c.text)
-        painter.drawText(line, Qt.AlignRight | Qt.AlignVCenter, self.value)
+        self._figures.paint(painter, line)
         if self.bar:
             track = QRectF(0, 22, self.width(), 5)
             painter.setPen(Qt.NoPen)
