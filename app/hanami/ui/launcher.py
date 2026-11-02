@@ -144,6 +144,7 @@ class AppCard(QFrame):
         self.dot.setFixedHeight(round(cap))          # as tall as the name's capitals, so centred on them
         corner.addWidget(self.dot, 0, Qt.AlignTop)
         self.more = QToolButton()
+        self.more.setObjectName('moreButton')
         self._more_icon()                           # Lucide's ellipsis, not a ⋯ character
         theme.on_restyle(self._more_icon)
         self.more.setPopupMode(QToolButton.InstantPopup)
@@ -385,6 +386,7 @@ class LauncherWindow(QWidget):
         return theme.card_style() + theme.panel_css('QFrame#card', 12) + f"""
             QWidget#launcher {{ background: {theme.css(c.card)}; }}
             QToolButton#settingsButton {{ color: {c.text.name()}; padding: 0px; }}
+            QToolButton#moreButton, QToolButton#moreButton:hover {{ border: none; padding: 0px; }}
         """
 
     def _locate(self, name: str) -> None:
