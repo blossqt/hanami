@@ -773,15 +773,34 @@ class FocusRingTests(unittest.TestCase):
 
 
 class PressTests(unittest.TestCase):
-    def test_a_pressed_button_gives(self):
+    def test_a_pressed_button_gives_and_keeps_its_words(self):
+        window = QWidget()
+        window.setStyleSheet('QWidget { background: #3a5560; } QPushButton { color: white; }')
+        layout = QVBoxLayout(window)
         button = QPushButton('Press')
-        button.resize(120, 34)
+        button.setFixedSize(120, 34)
+        layout.addWidget(button)
+        window.resize(160, 60)
+        button.installEventFilter(suitetheme._lights())
+        state = suitetheme._Light._state(button)
+        plain = button.grab().toImage()
         with mock.patch.object(suitetheme, 'motion_on', return_value=True):
-            scale, image = suitetheme._sink(button, {'press': 1.0, 'hover': 0.0})
-            self.assertLess(scale, 1.0)
-            self.assertGreater(scale, 0.95)
-            self.assertFalse(image.isNull())
-            self.assertIsNone(suitetheme._sink(button, {'press': 0.0, 'hover': 1.0}))
+            state['press'] = 1.0
+            suitetheme._sink(button, True)
+            effect = button.graphicsEffect()
+            self.assertIsInstance(effect, suitetheme._Sink)
+            self.assertLess(effect.scale(), 1.0)
+            self.assertGreater(effect.scale(), 0.95)
+            pressed = window.grab().toImage()
+            # its words are still drawn (0.1.52 lost them): light pixels in the button's middle
+            centre = button.geometry().center()
+            self.assertTrue(any(QColor(pressed.pixel(x, centre.y())).lightness() > 180
+                                for x in range(centre.x() - 20, centre.x() + 20)))
+            state['press'] = 0.0
+            suitetheme._sink(button, False)
+            self.assertIsNone(button.graphicsEffect())
+        self.assertFalse(plain.isNull())
+        window.close()
 
 
 class IconTests(unittest.TestCase):

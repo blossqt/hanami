@@ -1714,12 +1714,4 @@ def main(argv: list[str] | None = None) -> int:
                             'their own icons.')
     code = app.exec()
     controller.settings.sync()
-    sys.stdout and sys.stdout.flush()
-    sys.stderr and sys.stderr.flush()
-    # Ended here, not by Python's own exit: PySide's teardown of the tray menu could spin a core
-    # forever with every window gone (0.1.49), and a self-update waits for this process to end.
-    # TerminateProcess skips the DLLs' teardown too, where os._exit crashed with Qt still alive.
-    kernel32 = ctypes.windll.kernel32
-    kernel32.GetCurrentProcess.restype = ctypes.c_void_p
-    kernel32.TerminateProcess(ctypes.c_void_p(kernel32.GetCurrentProcess()), code)
-    return code
+    return theme.leave(code)        # a self-update waits for this process to end: it ends here
