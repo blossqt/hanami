@@ -988,8 +988,10 @@ class Controller(QObject):
                     and self.settings.told(app.name) != self.latest[app.name].version:
                 self.settings.set_told(app.name, self.latest[app.name].version)
                 if self.settings.notify_updates:
-                    self._say('Hanami', f'{app.name} {self.latest[app.name].version} is out. '
-                                          'Open Hanami to update it.', icons.app_icon(), 6000)
+                    then = (f'It goes in once you quit {app.name}.' if self.settings.auto_update
+                            else 'Open Hanami to update it.')
+                    self._say('Hanami', f'{app.name} {self.latest[app.name].version} is out. {then}',
+                              icons.app_icon(), 6000)
         self._update_window()
         self._show_checked()
 

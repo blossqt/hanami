@@ -24,6 +24,13 @@ from .suitesettings import glyph_font  # noqa: F401 - the icon font, read once i
 
 SOURCE = 'https://github.com/blossqt/hanami'
 
+UPDATE_CHOICES = {'install': 'Install it', 'tell': 'Tell me', 'off': 'Nothing'}
+UPDATE_LINES = {
+    'install': 'Hanami looks twice a day and when you open it. An app you’re using is updated once you quit it.',
+    'tell': 'Hanami looks twice a day and when you open it, and tells you what it finds.',
+    'off': 'Hanami looks only when you ask, and doesn’t update itself.',
+}
+
 
 _label, _section, _switch, _indent, _Nav = (suitesettings.label, suitesettings.section, suitesettings.switch,
                                             suitesettings.indent, suitesettings.Nav)
@@ -151,7 +158,7 @@ class _LookTile(QAbstractButton):
 
 class SettingsWindow(QWidget):
     startup_changed = Signal(bool, list)
-    updates_changed = Signal(bool, bool, bool)      # look by itself, tell me, install by itself
+    updates_changed = Signal(bool, bool, bool)      # look by itself, tell me, install by itself (one choice)
     hanami_updates_changed = Signal(bool)           # Hanami updates itself
     sound_changed = Signal(bool, str)               # the hotkey on, the hotkey
     window_sound_changed = Signal(bool)             # the switch at the top of Hanami's window: shown or not
@@ -570,19 +577,33 @@ class SettingsWindow(QWidget):
         page, layout = self._page('Updates', 'Hanami installs and updates the suite’s apps from their releases on '
                                              'GitHub, checking each one’s signature first.')
         frame, box = _section('Updates')
-        holder, self.check = _switch('Look for updates by itself', 'Twice a day, and when you open Hanami.', check)
-        box.addWidget(holder)
-        holder, self.notify = _switch('Tell me when one is out', '', notify)
-        box.addWidget(holder)
-        holder, self.auto = _switch('Install updates by itself', 'For the apps Hanami installed, while they aren’t '
-                                    'running; one you’re using is updated once you quit it.', auto)
-        box.addWidget(holder)
+        # One choice where there were three switches: telling or installing needs looking, and
+        # an app that installs by itself needs no telling.
+        group, choices = suitesettings.group('When an app has an update')
+        box.addWidget(group)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self.update_choice = QButtonGroup(self)
+        self.update_buttons: dict[str, QPushButton] = {}
+        chosen = 'off' if not check else 'install' if auto else 'tell'
+        for name, title in UPDATE_CHOICES.items():
+            button = QPushButton(title)
+            button.setCheckable(True)
+            button.setChecked(name == chosen)
+            button.setCursor(Qt.PointingHandCursor)
+            button.clicked.connect(lambda _, n=name: self._updates_edited(n))
+            self.update_choice.addButton(button)
+            self.update_buttons[name] = button
+        row.addWidget(suitesettings.Segmented(list(self.update_buttons.values())))
+        row.addStretch(1)
+        choices.addLayout(row)
+        self.update_line = _label('', suitesettings.SMALL, role='dim', wrap=True)
+        choices.addWidget(self.update_line)
         holder, self.hanami_auto = _switch('Update Hanami by itself', 'It restarts for a moment to do it, while its '
                                            'windows and panel are closed - never during a game.', hanami)
         self.hanami_auto.toggled.connect(self.hanami_updates_changed)
         box.addWidget(holder)
-        for switch in (self.check, self.notify, self.auto):
-            switch.toggled.connect(self._updates_edited)
+        self._show_update_choice(chosen)
         row = QHBoxLayout()
         row.setSpacing(12)
         self.check_button = QPushButton('Look now')
@@ -815,8 +836,13 @@ class SettingsWindow(QWidget):
         output_id, name = combo.currentData() or ('', '')
         self.output_chosen.emit(which, output_id, name)
 
-    def _updates_edited(self, *_) -> None:
-        self.updates_changed.emit(self.check.isChecked(), self.notify.isChecked(), self.auto.isChecked())
+    def _updates_edited(self, choice: str) -> None:
+        self._show_update_choice(choice)
+        self.updates_changed.emit(choice != 'off', choice != 'off', choice == 'install')
+
+    def _show_update_choice(self, choice: str) -> None:
+        self.update_line.setText(UPDATE_LINES[choice])
+        self.hanami_auto.setEnabled(choice != 'off')        # it finds its own updates the same way
 
     def _show_credit(self) -> None:
         link = f'style="color:{theme.ink()}; text-decoration:none"'

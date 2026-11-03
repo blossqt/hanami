@@ -650,6 +650,26 @@ class SelfUpdateTests(_Controlled):
         finally:
             window.close()
 
+    def test_one_choice_for_the_apps_updates(self):
+        for kept, shown in (((True, True, False), 'tell'), ((True, True, True), 'install'),
+                            ((False, True, True), 'off')):
+            window = SettingsWindow([], False, kept + (True,), (True, hanami.SOUND_HOTKEY), 'right')
+            try:
+                self.assertTrue(window.update_buttons[shown].isChecked(), shown)
+                self.assertEqual(window.hanami_auto.isEnabled(), shown != 'off', 'Hanami looks the same way')
+            finally:
+                window.close()
+        window = SettingsWindow([], False, (True, True, False, True), (True, hanami.SOUND_HOTKEY), 'right')
+        sent = []
+        window.updates_changed.connect(lambda *flags: sent.append(flags))
+        try:
+            for name, flags in (('install', (True, True, True)), ('off', (False, False, False)),
+                                ('tell', (True, True, False))):
+                window.update_buttons[name].click()
+                self.assertEqual(sent[-1], flags, name)
+        finally:
+            window.close()
+
 
 class PanelTests(_Controlled):
     """The edge panel. Where the pointer is, and what is in front, are stand-ins."""
