@@ -27,7 +27,7 @@ SOURCE = 'https://github.com/blossqt/hanami'
 UPDATE_CHOICES = {'install': 'Install it', 'tell': 'Tell me', 'off': 'Nothing'}
 UPDATE_LINES = {
     'install': 'Hanami looks twice a day and when you open it. An app you’re using is updated once you quit it.',
-    'tell': 'Hanami looks twice a day and when you open it, and tells you what it finds.',
+    'tell': 'Hanami looks twice a day and when you open it.',
     'off': 'Hanami looks only when you ask, and doesn’t update itself.',
 }
 
@@ -236,10 +236,6 @@ class SettingsWindow(QWidget):
         choices.addLayout(grid)
         self.startup.toggled.connect(self._startup_edited)
         layout.addWidget(frame)
-        frame, box = _section('The tray')
-        box.addWidget(_label('Closing Hanami’s window keeps it running in the tray. Its tray menu holds each running '
-                             'app’s own menu, and Quit Hanami.', suitesettings.SMALL, role='dim', wrap=True))
-        layout.addWidget(frame)
         layout.addStretch(1)
         return page
 
@@ -250,8 +246,7 @@ class SettingsWindow(QWidget):
         page, layout = self._page('Edge panel', '')
         frame, box = _section('')
         holder, self.panel_on = _switch('Slide out a panel at the edge of the screen',
-                                        'Rest the pointer on the tab at the edge, or click it. It stays shut over '
-                                        'games and anything full screen.',
+                                        'It stays shut over games and anything full screen.',
                                         bool(panel_edge))
         self.panel_on.toggled.connect(self._panel_edited)
         box.addWidget(holder)
@@ -278,7 +273,7 @@ class SettingsWindow(QWidget):
         for name, title, about in (
                 ('apps', 'Hanami suite', ''), ('pinned', 'Shortcuts', ''),
                 ('stats', 'Stats', 'The processor and memory - and, with an NVIDIA graphics card, its load, memory '
-                                   'and temperature. The processor’s temperature needs Hanami Sensors, below.')):
+                                   'and temperature.')):
             holder, check = _switch(title, about, name in chosen)
             check.toggled.connect(self._pages_edited)
             box.addWidget(holder)
@@ -297,8 +292,8 @@ class SettingsWindow(QWidget):
             self.button_switches[name] = check
         layout.addWidget(frame)
         frame, box = _section('Brightness')
-        holder, self.brightness_switch = _switch('Monitor brightness', 'A slider for each monitor, under the volume in the panel. '
-                                                 'A monitor has one only with DDC/CI on in its own menu.',
+        holder, self.brightness_switch = _switch('Monitor brightness', 'A monitor has a slider only with DDC/CI on '
+                                                 'in its own menu.',
                                                  brightness_on)
         self.brightness_switch.toggled.connect(self.brightness_changed)
         box.addWidget(holder)
@@ -309,9 +304,8 @@ class SettingsWindow(QWidget):
         box.addWidget(self.monitors_found)
         layout.addWidget(frame)
         frame, box = _section('CPU temperature')
-        box.addWidget(_label('Windows doesn’t give apps the processor’s temperature. Hanami Sensors reads it '
-                             'through PawnIO, as FanControl does: a small service that runs only while the stats '
-                             'page is in sight. Installing it asks for administrator permission.', suitesettings.SMALL, role='dim',
+        box.addWidget(_label('Hanami Sensors reads it, a small service that runs only while the stats page is in '
+                             'sight. Installing it asks for administrator permission.', suitesettings.SMALL, role='dim',
                              wrap=True))
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -490,12 +484,10 @@ class SettingsWindow(QWidget):
             grid.addWidget(combo, row, 1)
         grid.setColumnStretch(2, 1)
         box.addLayout(grid)
-        holder, self.window_sound = _switch('Show the switch in Hanami’s window',
-                                            'At the top of the window, it goes between these two.', window_sound)
+        holder, self.window_sound = _switch('Show the switch in Hanami’s window', '', window_sound)
         self.window_sound.toggled.connect(self.window_sound_changed)
         box.addWidget(holder)
-        holder, self.sound_on = _switch('Switch between them with a hotkey', 'A pop-up names the output it went '
-                                        'to.', on)
+        holder, self.sound_on = _switch('Switch between them with a hotkey', '', on)
         self.sound_on.toggled.connect(self._sound_edited)
         box.addWidget(holder)
         row = QHBoxLayout()
@@ -521,8 +513,7 @@ class SettingsWindow(QWidget):
     def _screen_text(self, on: bool, hotkey: str) -> QWidget:
         page, layout = self._page('Screen text', '')
         frame, box = _section('Copy text from the screen')
-        holder, self.text_on = _switch('Open with a hotkey', 'The screen stays as it is while you draw round '
-                                       'text, or drag across it, to copy it. Windows reads it, on this PC.', on)
+        holder, self.text_on = _switch('Open with a hotkey', 'Windows reads the text, on this PC.', on)
         self.text_on.toggled.connect(self._text_edited)
         box.addWidget(holder)
         row = QHBoxLayout()
@@ -574,8 +565,7 @@ class SettingsWindow(QWidget):
         self.sound_problem.setVisible(bool(problem))
 
     def _updates(self, check: bool, notify: bool, auto: bool, hanami: bool = True) -> QWidget:
-        page, layout = self._page('Updates', 'Hanami installs and updates the suite’s apps from their releases on '
-                                             'GitHub, checking each one’s signature first.')
+        page, layout = self._page('Updates', '')
         frame, box = _section('Updates')
         # One choice where there were three switches: telling or installing needs looking, and
         # an app that installs by itself needs no telling.
