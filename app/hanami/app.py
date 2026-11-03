@@ -428,6 +428,7 @@ class Controller(QObject):
         self._make_tray()
         self._listen()
         self.sound_popup: SoundPopup | None = None
+        self._unmatched = ''                            # an output in use that is neither chosen one
         self.panel = EdgePanel(quiet=self._panel_quiet)
         self.panel.open_app.connect(self.open_app)
         self.panel.open_hanami.connect(self.show_window)
@@ -628,6 +629,15 @@ class Controller(QObject):
         other one). A guess is kept, so it stays put until changed. {'speakers': (id, name), ...}."""
         s = self.settings
         chosen = {which: s.output(which) for which in ('speakers', 'headphones')}
+        if present is not None:
+            # Windows gives a device a new id when it is plugged into another port or its driver is
+            # put in again (the user's Protocol Max did). The one output still of that name is it.
+            ids = {o.id for o in present}
+            for which, picked in chosen.items():
+                same = [o for o in present if picked and picked[0] not in ids and o.name == picked[1]]
+                if len(same) == 1:
+                    chosen[which] = (same[0].id, same[0].name)
+                    s.set_output(which, same[0].id, same[0].name)
         if all(chosen.values()) or s._flag('sound/guessed', False):
             return chosen
         try:
@@ -652,13 +662,18 @@ class Controller(QObject):
     def choose_output(self, which: str, say: bool = False) -> None:
         """Send the sound to the speakers or the headphones (opening Settings to choose them if
         they aren't yet), and show where it went."""
-        picked = self.outputs_chosen().get(which)
+        try:
+            outputs = audio.outputs()
+        except OSError:
+            outputs = None
+        picked = self.outputs_chosen(outputs).get(which)
         if picked is None:
             self.show_settings('Sound')
             return
         try:
-            present = {o.id for o in audio.outputs()}
-            if picked[0] in present:
+            if outputs is None:
+                raise OSError('the outputs couldn’t be listed')
+            if picked[0] in {o.id for o in outputs}:
                 audio.choose(picked[0])
                 said = picked[1]
             else:
@@ -727,6 +742,13 @@ class Controller(QObject):
             return
         chosen = self.outputs_chosen()
         side = next((which for which, picked in chosen.items() if picked and picked[0] == now), None)
+        if side is None and now and now != self._unmatched:
+            self._unmatched = now                       # listed once per output, not every 2 s
+            try:
+                chosen = self.outputs_chosen(audio.outputs())   # one chosen may have a new id
+            except OSError:
+                pass
+            side = next((which for which, picked in chosen.items() if picked and picked[0] == now), None)
         names = {which: picked[1] if picked else 'not chosen' for which, picked in chosen.items()}
         for toggle in toggles:
             toggle.show_output(side, f'Speakers: {names["speakers"]}\nHeadphones: {names["headphones"]}')

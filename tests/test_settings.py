@@ -302,6 +302,33 @@ class SoundTests(_Controlled):
         self.assertEqual(self.now, 'ed', 'nothing changed')
         self.assertEqual(self.controller.sound_popup.name, 'Headphones (Protocol Max) isn’t connected')
 
+    def test_a_new_id_for_the_same_device(self):
+        """Another USB port or a driver put in again: Windows' id changes, the name doesn't (the
+        user's Protocol Max said it wasn't connected while it played)."""
+        self.controller.outputs_chosen()
+        self.outputs = [self.audio.Output('hp2', o.name) if o.id == 'hp' else o for o in self.outputs]
+        self.controller.switch_sound()
+        self.assertEqual(self.now, 'hp2')
+        self.assertEqual(self.controller.sound_popup.name, 'Headphones (Protocol Max)')
+        self.assertEqual(self.controller.settings.output('headphones')[0], 'hp2', 'kept from now on')
+        self.outputs.append(self.audio.Output('hp3', 'Headphones (Protocol Max)'))
+        self.outputs = [o for o in self.outputs if o.id != 'hp2']
+        self.outputs.append(self.audio.Output('hp4', 'Headphones (Protocol Max)'))
+        self.controller.switch_sound()                      # (back to the speakers)
+        self.controller.switch_sound()
+        self.assertEqual(self.now, 'ed', 'two of that name: not a guess between them')
+        self.assertIn('isn’t connected', self.controller.sound_popup.name)
+
+    def test_the_switch_finds_a_new_id_by_itself(self):
+        self.controller.outputs_chosen()
+        self.outputs = [self.audio.Output('hp2', o.name) if o.id == 'hp' else o for o in self.outputs]
+        self.now = 'hp2'                                    # chosen in Windows' own menu
+        from hanami.ui.launcher import LauncherWindow
+        self.controller.window = LauncherWindow()
+        self.controller.window.show()
+        self.controller._show_sound('hp2')
+        self.assertEqual(self.controller.window.sound.side, 'headphones')
+
     def test_the_switch_on_the_main_window(self):
         from hanami.ui.launcher import LauncherWindow
         controller = self.controller
