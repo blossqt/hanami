@@ -1,4 +1,4 @@
-﻿# Windows version resource for Hanami.exe (PyInstaller's VSVersionInfo format).
+# Windows version resource for Hanami.exe (PyInstaller's VSVersionInfo format).
 # Keep filevers/prodvers and the strings in step with app/hanami/__init__.py.
 VSVersionInfo(
   ffi=FixedFileInfo(
