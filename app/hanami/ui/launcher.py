@@ -354,6 +354,8 @@ class LauncherWindow(QWidget):
             grid.addWidget(card, index // 2, index % 2)
         for column in (0, 1):
             grid.setColumnStretch(column, 1)
+        self.grid = grid
+        self._arranged = [app.name for app in SUITE]
         layout.addLayout(grid)
         layout.addStretch(1)
 
@@ -364,6 +366,19 @@ class LauncherWindow(QWidget):
         layout.addWidget(self.foot)
         theme.restyle(self, self._style)
         self.show_hanami('')
+
+    def arrange(self, names: list[str]) -> None:
+        """Only these apps' cards, two to a row in the suite's order, with no gap where one is left
+        out (an app shown only once it is installed)."""
+        if names == self._arranged:
+            return
+        self._arranged = list(names)
+        for card in self.cards.values():
+            self.grid.removeWidget(card)
+        for index, name in enumerate(names):
+            self.grid.addWidget(self.cards[name], index // 2, index % 2)
+        for name, card in self.cards.items():
+            card.setVisible(name in names)
 
     def _settings_icon(self) -> None:
         self.settings.setIcon(suiteicons.icon('gear', theme.colors().text, 18))

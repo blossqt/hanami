@@ -505,6 +505,41 @@ class InstallProgressTests(_Controlled):
         self.controller.settings.set_installed('Grabbit', None)
 
 
+class OnlyOnceInstalledTests(_Controlled):
+    """Keyglow is never offered for installing - it needs a Drop ALT (the user, 2026-11-04): Hanami
+    shows its card, and its ticks in Settings, only while it is on this PC."""
+
+    def test_shown_only_while_on_this_pc(self):
+        from unittest import mock
+        from hanami.ui.launcher import LauncherWindow
+        from hanami.ui.settings import SettingsWindow
+        self.assertTrue(hanami.catalog.BY_NAME['Keyglow'].only_once_installed)
+        here = {'Grabbit': Path(sys.executable)}
+        with mock.patch.object(hanami.Settings, 'exe', lambda s, name: here.get(name)):
+            self.assertFalse(self.controller.listed('Keyglow'), 'not offered')
+            self.assertTrue(self.controller.listed('Keytap'), 'the others are, installed or not')
+            self.controller.window = LauncherWindow()
+            self.controller._update_window()
+            cards = self.controller.window.cards
+            self.assertTrue(cards['Keyglow'].isHidden())
+            self.assertFalse(cards['Homework Hub'].isHidden())
+            grid = self.controller.window.grid
+            self.assertEqual(grid.getItemPosition(grid.indexOf(cards['Homework Hub']))[:2], (1, 1))
+            window = SettingsWindow([], False, (True, True, False),
+                                    apps=[a.name for a in hanami.catalog.SUITE if self.controller.listed(a.name)])
+            self.assertNotIn('Keyglow', window.start_with)
+            self.assertNotIn('Keyglow', window.panel_app_checks)
+            self.assertIn('Keytap', window.start_with)
+            window.close()
+
+            here['Keyglow'] = Path(sys.executable)          # installed, or built here
+            self.assertTrue(self.controller.listed('Keyglow'))
+            self.controller._update_window()
+            self.assertFalse(cards['Keyglow'].isHidden())
+            self.assertEqual(grid.getItemPosition(grid.indexOf(cards['Keyglow']))[:2], (2, 0))
+        self.controller.window.close()
+
+
 class RestartTests(_Controlled):
     """An app quit for its update starts again in the tray (the user's wish, 2026-11-02); a new
     install opens."""

@@ -29,6 +29,9 @@ class SuiteApp:
     # What it is started with along with Hanami, to stay in the background rather than open its window.
     # Only for apps that ask: Grabbit, say, takes any argument for a link to download.
     startup_args: tuple[str, ...] = ()
+    # Not offered for installing: shown (its card, its ticks in Settings) only once it is on this PC.
+    # For an app that is of use only to some - Keyglow needs a Drop ALT keyboard (the user, 2026-11-04).
+    only_once_installed: bool = False
 
     @property
     def manifest_app(self) -> str:
@@ -57,7 +60,8 @@ SUITE = (
              release_name='HomeworkHub', single_exe=True, self_test=False, startup_args=('--no-window',)),
     SuiteApp('Keyglow', 'Sets the Drop ALT keyboard’s key and base lighting.', 'Keyglow.exe',
              _DOCUMENTS / 'Keyglow' / 'dist' / 'Keyglow' / 'Keyglow.exe',
-             'blossqt/keyglow', '90b65151eb455d45d0738241118b34d72d3867e3f22d998cf03458afdd1c3f28'),
+             'blossqt/keyglow', '90b65151eb455d45d0738241118b34d72d3867e3f22d998cf03458afdd1c3f28',
+             only_once_installed=True),
 )
 
 # Hanami itself: checked for newer releases, which its window then points to.

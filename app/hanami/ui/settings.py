@@ -185,8 +185,11 @@ class SettingsWindow(QWidget):
                  tab: tuple[int, int, int] | None = None, pinned: list | None = None,
                  panel_pages: list[str] | None = None, brightness_on: bool = True,
                  text: tuple[bool, str] = (True, ''), panel_buttons: list[str] | None = None,
-                 window_sound: bool = True, panel_hidden: list[str] | None = None):
+                 window_sound: bool = True, panel_hidden: list[str] | None = None,
+                 apps: list[str] | None = None):
         super().__init__()
+        # the apps it has ticks for: all, but for one shown only once it is on this PC
+        self._apps = [app for app in SUITE if apps is None or app.name in apps]
         self.setWindowTitle('Hanami settings')
         self.setWindowIcon(icons.app_icon())
         theme.frost(self, backdrop=theme.BACKDROP)
@@ -226,7 +229,7 @@ class SettingsWindow(QWidget):
         grid.setHorizontalSpacing(24)
         grid.setVerticalSpacing(8)
         self.start_with: dict[str, QCheckBox] = {}
-        for index, app in enumerate(SUITE):
+        for index, app in enumerate(self._apps):
             check = QCheckBox(app.name)
             check.setChecked(app.name in start_with)
             check.setCursor(Qt.PointingHandCursor)
@@ -727,7 +730,7 @@ class SettingsWindow(QWidget):
         grid.setHorizontalSpacing(24)
         grid.setVerticalSpacing(8)
         self.panel_app_checks: dict[str, QCheckBox] = {}
-        for index, app in enumerate(SUITE):
+        for index, app in enumerate(self._apps):
             check = QCheckBox(app.name)
             check.setChecked(app.name not in hidden)
             check.setCursor(Qt.PointingHandCursor)

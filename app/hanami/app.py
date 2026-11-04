@@ -1548,7 +1548,8 @@ class Controller(QObject):
                                                   (s.sound_hotkey_on, s.sound_hotkey), s.panel_edge, s.panel_tab,
                                                   s.pinned, s.panel_pages, s.panel_brightness,
                                                   (s.text_hotkey_on, s.text_hotkey), s.panel_buttons,
-                                                  s.window_sound, s.panel_hidden)
+                                                  s.window_sound, s.panel_hidden,
+                                                  apps=[a.name for a in catalog.SUITE if self.listed(a.name)])
             self.settings_window.startup_changed.connect(self._startup_changed)
             self.settings_window.sound_changed.connect(self._sound_changed)
             self.settings_window.window_sound_changed.connect(self._window_sound_changed)
@@ -1590,6 +1591,12 @@ class Controller(QObject):
         self.settings_window.raise_()
         self.settings_window.activateWindow()
 
+    def listed(self, name: str) -> bool:
+        """Whether Hanami shows the app: always, or - one only_once_installed - while it is on this
+        PC (or a job on it is under way, so an uninstall's card stays until it is done)."""
+        app = catalog.BY_NAME[name]
+        return not app.only_once_installed or self.settings.exe(name) is not None or name in self.jobs
+
     def card_state(self, name: str) -> CardState:
         exe = self.settings.exe(name)
         release = self.latest.get(name)
@@ -1605,6 +1612,7 @@ class Controller(QObject):
         self._show_hanami_update()
         if self.window is None:
             return
+        self.window.arrange([app.name for app in catalog.SUITE if self.listed(app.name)])
         for app in catalog.SUITE:
             self.window.cards[app.name].show_state(self.card_state(app.name))
         mine = self.latest.get(catalog.HANAMI.name)
