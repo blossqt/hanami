@@ -168,6 +168,7 @@ class SettingsWindow(QWidget):
     tab_changed = Signal(int, int, int)             # the panel's tab: its length and thickness (px), opacity at rest (%)
     pins_changed = Signal(list)                     # the panel's shortcuts: [pins.Pin]
     pages_changed = Signal(list)                    # the panel's pages: names from panel.PAGES, in order
+    panel_apps_changed = Signal(list)               # the suite's apps left off the panel's apps page
     sensors_asked = Signal(str)                     # Hanami Sensors: '--install' (or update) or '--uninstall'
     brightness_changed = Signal(bool)               # the panel's brightness sliders: on or off
     buttons_changed = Signal(list)                  # the panel's buttons: names from panel.BUTTONS
@@ -184,7 +185,7 @@ class SettingsWindow(QWidget):
                  tab: tuple[int, int, int] | None = None, pinned: list | None = None,
                  panel_pages: list[str] | None = None, brightness_on: bool = True,
                  text: tuple[bool, str] = (True, ''), panel_buttons: list[str] | None = None,
-                 window_sound: bool = True):
+                 window_sound: bool = True, panel_hidden: list[str] | None = None):
         super().__init__()
         self.setWindowTitle('Hanami settings')
         self.setWindowIcon(icons.app_icon())
@@ -194,7 +195,7 @@ class SettingsWindow(QWidget):
         self.nav, self.pages = frame.nav, frame.pages
         made = [self._general(start_with, starts_with_windows),
                 self._scrolled(self._edge_panel(panel_edge, tab, list(pinned or []), panel_pages, brightness_on,
-                                                panel_buttons)),
+                                                panel_buttons, panel_hidden or [])),
                 self._appearance(), self._games(), self._sound(*sound, window_sound), self._screen_text(*text),
                 self._updates(*updates), self._about()]
         for (mark, title), widget in zip(self.PAGES, made):
@@ -241,7 +242,7 @@ class SettingsWindow(QWidget):
 
     def _edge_panel(self, panel_edge: str, tab: tuple[int, int, int] | None, pinned: list,
                     panel_pages: list[str] | None = None, brightness_on: bool = True,
-                    panel_buttons: list[str] | None = None) -> QWidget:
+                    panel_buttons: list[str] | None = None, panel_hidden: list[str] = ()) -> QWidget:
         from .panel import BUTTONS, PAGES, TAB_LIMITS, TAB_LOOK     # (the panel's sound switch is drawn from here)
         page, layout = self._page('Edge panel', '')
         frame, box = _section('')
@@ -278,6 +279,8 @@ class SettingsWindow(QWidget):
             check.toggled.connect(self._pages_edited)
             box.addWidget(holder)
             self.page_switches[name] = check
+            if name == 'apps':                      # which of the suite's apps that page shows
+                box.addWidget(self._panel_apps(panel_hidden))
         layout.addWidget(frame)
         frame, box = _section('Buttons')
         shown = list(BUTTONS) if panel_buttons is None else panel_buttons
@@ -716,12 +719,37 @@ class SettingsWindow(QWidget):
             text = 'No monitor here answers DDC/CI.'
         self.monitors_found.setText(text)
 
+    def _panel_apps(self, hidden) -> QWidget:
+        """A tick for each of the suite's apps, two by two, as under Starting up."""
+        group, choices = suitesettings.group('Apps')
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(24)
+        grid.setVerticalSpacing(8)
+        self.panel_app_checks: dict[str, QCheckBox] = {}
+        for index, app in enumerate(SUITE):
+            check = QCheckBox(app.name)
+            check.setChecked(app.name not in hidden)
+            check.setCursor(Qt.PointingHandCursor)
+            check.toggled.connect(self._panel_apps_edited)
+            self.panel_app_checks[app.name] = check
+            grid.addWidget(check, index // 2, index % 2)
+        grid.setColumnStretch(2, 1)
+        choices.addLayout(grid)
+        return group
+
+    def _panel_apps_edited(self, *_) -> None:
+        self.panel_apps_changed.emit([name for name, check in self.panel_app_checks.items() if not check.isChecked()])
+
     def _pages_edited(self, *_, emit: bool = True) -> None:
-        """The panel's pages: at least one stays - the last one on can't be turned off."""
+        """The panel's pages: at least one stays - the last one on can't be turned off. The apps
+        page's apps are chosen only while it is on."""
         names = [name for name, check in self.page_switches.items() if check.isChecked()]
         on = self.panel_on.isChecked()
         for check in self.page_switches.values():
             check.setEnabled(on and not (check.isChecked() and len(names) == 1))
+        for check in self.panel_app_checks.values():
+            check.setEnabled(on and 'apps' in names)
         if emit and names:
             self.pages_changed.emit(names)
 

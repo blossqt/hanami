@@ -250,6 +250,20 @@ class Settings:
         self._store.setValue('panel/pages', json.dumps([name for name in PAGES if name in names]))
 
     @property
+    def panel_hidden(self) -> list[str]:
+        """The suite's apps left off the panel's apps page. Kept as those hidden, so an app new to
+        the suite shows until it is turned off."""
+        try:
+            names = json.loads(str(self._store.value('panel/hidden', '[]')))
+        except ValueError:
+            names = []
+        return [name for name in catalog.BY_NAME if isinstance(names, list) and name in names]
+
+    @panel_hidden.setter
+    def panel_hidden(self, names: list[str]) -> None:
+        self._store.setValue('panel/hidden', json.dumps([name for name in catalog.BY_NAME if name in names]))
+
+    @property
     def window_sound(self) -> bool:
         """Whether Hanami's window shows its speakers/headphones switch at the top."""
         return self._flag('window/sound', True)
@@ -778,20 +792,29 @@ class Controller(QObject):
         return theme.quiet_now() or win32.fullscreen_in_front()
 
     def _fill_panel(self) -> None:
-        """The panel's apps - those on this PC, a dot by those running - and its sound switch."""
-        apps = []
-        for app in catalog.SUITE:
-            exe = self.settings.exe(app.name)
-            if exe is None:
-                continue
-            apps.append((app.name, self._panel_icon(app.name, exe), self.is_running(app.name)))
-        self.panel.show_apps(apps)
+        """The panel's apps, its shortcuts and its sound switch."""
+        self._show_panel_apps()
         self.panel.show_pins([(pin.name, self._pin_icon(pin)) for pin in self.settings.pinned])
         if 'stats' in self.settings.panel_pages:
             self.sampler.prepare()                  # NVIDIA's driver, loaded only for the stats page
             self.sampler.sensors.wake()             # Hanami Sensors started now, ready by the time it is in sight
         self._look_for_monitors()                   # each time: they may have been set by their own buttons
         self._audio.ask(mic=True)                   # (not here: it would stall the panel as it slides out)
+
+    def _show_panel_apps(self) -> None:
+        """The apps on this PC not turned off in Settings, a dot by those running."""
+        hidden = self.settings.panel_hidden
+        apps = []
+        for app in catalog.SUITE:
+            exe = self.settings.exe(app.name)
+            if exe is None or app.name in hidden:
+                continue
+            apps.append((app.name, self._panel_icon(app.name, exe), self.is_running(app.name)))
+        self.panel.show_apps(apps)
+
+    def _panel_apps_changed(self, hidden: list) -> None:
+        self.settings.panel_hidden = hidden
+        self._show_panel_apps()
 
     def _look_for_monitors(self) -> None:
         """Read the monitors' brightness, on brightness' own thread - not while a game is in front,
@@ -1525,7 +1548,7 @@ class Controller(QObject):
                                                   (s.sound_hotkey_on, s.sound_hotkey), s.panel_edge, s.panel_tab,
                                                   s.pinned, s.panel_pages, s.panel_brightness,
                                                   (s.text_hotkey_on, s.text_hotkey), s.panel_buttons,
-                                                  s.window_sound)
+                                                  s.window_sound, s.panel_hidden)
             self.settings_window.startup_changed.connect(self._startup_changed)
             self.settings_window.sound_changed.connect(self._sound_changed)
             self.settings_window.window_sound_changed.connect(self._window_sound_changed)
@@ -1535,6 +1558,7 @@ class Controller(QObject):
             self.settings_window.tab_changed.connect(self._tab_changed)
             self.settings_window.pins_changed.connect(self._pins_changed)
             self.settings_window.pages_changed.connect(self._pages_changed)
+            self.settings_window.panel_apps_changed.connect(self._panel_apps_changed)
             self.settings_window.sensors_asked.connect(self._sensors_asked)
             self.settings_window.brightness_changed.connect(self._brightness_changed)
             self.settings_window.buttons_changed.connect(self._buttons_changed)

@@ -972,6 +972,31 @@ class PanelTests(_Controlled):
             window.close()
             self.controller._pages_changed(list(self.panel_module.PAGES))
 
+    def test_its_apps_are_chosen_in_settings(self):
+        s = self.controller.settings
+        self.assertEqual(s.panel_hidden, [], 'every app shows until one is turned off')
+        window = SettingsWindow([], False, (True, True, False), (True, hanami.SOUND_HOTKEY), 'right',
+                                panel_pages=s.panel_pages, panel_hidden=s.panel_hidden)
+        window.panel_apps_changed.connect(self.controller._panel_apps_changed)
+        try:
+            self.controller._fill_panel()
+            self.assertIn('Dropshift', self.panel.buttons)
+            window.panel_app_checks['Dropshift'].setChecked(False)
+            self.assertEqual(s.panel_hidden, ['Dropshift'], 'kept')
+            self.assertNotIn('Dropshift', self.panel.buttons, 'and gone from the panel at once')
+            self.assertIn('Keytap', self.panel.buttons)
+            self.controller._fill_panel()
+            self.assertNotIn('Dropshift', self.panel.buttons, 'still gone the next time it slides out')
+            window.page_switches['apps'].setChecked(False)
+            self.assertFalse(window.panel_app_checks['Keytap'].isEnabled(), 'nothing to choose without the page')
+            window.panel_app_checks['Dropshift'].setChecked(True)
+            self.assertEqual(s.panel_hidden, [])
+            self.assertIn('Dropshift', self.panel.buttons)
+        finally:
+            window.close()
+            self.controller._panel_apps_changed([])
+            self.controller._pages_changed(list(self.panel_module.PAGES))
+
     def test_shortcuts(self):
         from unittest import mock
         from hanami.ui import pins
