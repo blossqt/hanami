@@ -6,7 +6,8 @@
 Written once, here in Hanami, and copied into each app:
 
     suitelink.py    every app: its tray menu, folded into Hanami's blossom
-    suitetray.py    the Qt apps: suitelink, plus their own icon when Hanami isn't there
+    suitetray.py    the Qt apps with a tray icon: suitelink, plus their own icon when Hanami isn't
+                    there (not Keyglow, which is only its window)
     suitetheme.py   the Qt apps, in ui\\: the pink, check boxes, colours, fonts and cards;
                     each app's ui\\theme.py imports it and adds its own colours
     suitesettings.py the Qt apps, in ui\\: settings windows' pages, sections and switches
@@ -31,17 +32,19 @@ DOCUMENTS = Path.home() / 'Documents'
 
 QT_APPS = [DOCUMENTS / 'Keytap' / 'app' / 'keytap', DOCUMENTS / 'Dropshift' / 'app' / 'dropshift',
            DOCUMENTS / 'Grabbit' / 'app' / 'grabbit']
-RELEASED_BY_THE_KIT = [DOCUMENTS / 'Keytap' / 'build', DOCUMENTS / 'Dropshift' / 'build']
+# Keyglow: a window only, with no tray icon of its own - its menu shows in Hanami's while it is open.
+KEYGLOW = DOCUMENTS / 'Keyglow' / 'app' / 'keyglow'
+RELEASED_BY_THE_KIT = [DOCUMENTS / 'Keytap' / 'build', DOCUMENTS / 'Dropshift' / 'build', DOCUMENTS / 'Keyglow' / 'build']
 
 COPIES = {
-    ROOT / 'app' / 'hanami' / 'suitelink.py': QT_APPS + [DOCUMENTS / 'homework-hub'],
+    ROOT / 'app' / 'hanami' / 'suitelink.py': QT_APPS + [KEYGLOW, DOCUMENTS / 'homework-hub'],
     ROOT / 'app' / 'hanami' / 'suitetray.py': QT_APPS,
-    ROOT / 'app' / 'hanami' / 'ui' / 'suitetheme.py': [app / 'ui' for app in QT_APPS],
-    ROOT / 'app' / 'hanami' / 'ui' / 'suitesettings.py': [app / 'ui' for app in QT_APPS],
-    ROOT / 'app' / 'hanami' / 'ui' / 'suiteicons.py': [app / 'ui' for app in QT_APPS],
-    ROOT / 'app' / 'hanami' / 'ui' / 'GeistSerif-Regular.ttf': [app / 'ui' for app in QT_APPS],
-    ROOT / 'app' / 'hanami' / 'ui' / 'GeistSerif-OFL.txt': [app / 'ui' for app in QT_APPS],
-    ROOT / 'app' / 'hanami' / 'suitelog.py': QT_APPS + [DOCUMENTS / 'homework-hub'],
+    ROOT / 'app' / 'hanami' / 'ui' / 'suitetheme.py': [app / 'ui' for app in QT_APPS + [KEYGLOW]],
+    ROOT / 'app' / 'hanami' / 'ui' / 'suitesettings.py': [app / 'ui' for app in QT_APPS + [KEYGLOW]],
+    ROOT / 'app' / 'hanami' / 'ui' / 'suiteicons.py': [app / 'ui' for app in QT_APPS + [KEYGLOW]],
+    ROOT / 'app' / 'hanami' / 'ui' / 'GeistSerif-Regular.ttf': [app / 'ui' for app in QT_APPS + [KEYGLOW]],
+    ROOT / 'app' / 'hanami' / 'ui' / 'GeistSerif-OFL.txt': [app / 'ui' for app in QT_APPS + [KEYGLOW]],
+    ROOT / 'app' / 'hanami' / 'suitelog.py': QT_APPS + [KEYGLOW, DOCUMENTS / 'homework-hub'],
     ROOT / 'app' / 'hanami' / 'suiteocr.py': [DOCUMENTS / 'Dropshift' / 'app' / 'dropshift'],
     ROOT / 'app' / 'hanami' / 'suiteweb.py': [DOCUMENTS / 'Dropshift' / 'app' / 'dropshift',
                                               DOCUMENTS / 'Grabbit' / 'app' / 'grabbit'],

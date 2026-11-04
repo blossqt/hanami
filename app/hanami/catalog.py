@@ -55,6 +55,9 @@ SUITE = (
              _DOCUMENTS / 'homework-hub' / 'dist' / 'HomeworkHub.exe',
              'blossqt/homework-hub-releases', 'd7cfd2d285134baa76c7a45512b9d04ccb63601364bbaff1f7898c3eba479b20',
              release_name='HomeworkHub', single_exe=True, self_test=False, startup_args=('--no-window',)),
+    SuiteApp('Keyglow', 'Sets the Drop ALT keyboard’s key and base lighting.', 'Keyglow.exe',
+             _DOCUMENTS / 'Keyglow' / 'dist' / 'Keyglow' / 'Keyglow.exe',
+             'blossqt/keyglow', '90b65151eb455d45d0738241118b34d72d3867e3f22d998cf03458afdd1c3f28'),
 )
 
 # Hanami itself: checked for newer releases, which its window then points to.
