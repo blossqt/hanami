@@ -6,10 +6,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QProgressBar,
-                               QPushButton, QToolButton, QVBoxLayout, QWidget)
+                               QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget)
 
 from .. import __version__, win32
 from ..catalog import SUITE
@@ -179,14 +179,14 @@ class AppCard(QFrame):
         buttons.setSpacing(8)
         self.open = QPushButton('Open')             # pink only as Install: Open and Start are routine
         self.open.clicked.connect(self._primary)
-        self.update = QPushButton('Update')
-        self.update.setProperty('role', 'primary')
-        self.update.clicked.connect(lambda: self.install_clicked.emit(app.name))
+        self.update_button = QPushButton('Update')
+        self.update_button.setProperty('role', 'primary')
+        self.update_button.clicked.connect(lambda: self.install_clicked.emit(app.name))
         self.quit = QPushButton('Quit')
         self.quit.clicked.connect(lambda: self.quit_clicked.emit(app.name))
         self.cancel = QPushButton('Cancel')
         self.cancel.clicked.connect(lambda: self.cancel_clicked.emit(app.name))
-        for button in (self.open, self.update, self.quit, self.cancel):
+        for button in (self.open, self.update_button, self.quit, self.cancel):
             button.setCursor(Qt.PointingHandCursor)
             buttons.addWidget(button)
         buttons.addStretch(1)
@@ -276,9 +276,9 @@ class AppCard(QFrame):
         self.open.setVisible(not busy)
         # 'Update to 0.2.36' didn't fit beside Open and Quit on a laptop's narrower cards, and was cut
         # at both ends: the button says Update, and its tooltip which version
-        self.update.setText('Update')
-        self.update.setToolTip(f'Update to {s.latest}' if s.latest else '')
-        self.update.setVisible(s.update and not busy)
+        self.update_button.setText('Update')
+        self.update_button.setToolTip(f'Update to {s.latest}' if s.latest else '')
+        self.update_button.setVisible(s.update and not busy)
         self.quit.setVisible(s.in_tray and not busy)
         self.cancel.setVisible(busy and s.busy in ('download', 'unpack', 'quit'))
         self.more.setVisible(not busy)
@@ -291,6 +291,36 @@ class AppCard(QFrame):
         if s.installed:
             self.menu.addSeparator()
             self.menu.addAction(f'Uninstall {self.app.name}', lambda: self.uninstall_clicked.emit(self.app.name))
+
+
+class _CardsArea(QScrollArea):
+    """The cards, scrolled up and down only: as wide as they need at least (so the window is too),
+    as tall as they like when there is room, and as short as the window is made."""
+
+    LEAST = 652                 # the window at 700 wide at least, less its margins (24 each side)
+
+    def __init__(self, cards: QWidget):
+        super().__init__()
+        self.setObjectName('cards')
+        self.setWidget(cards)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        cards.installEventFilter(self)
+
+    def _bar(self) -> int:
+        return self.verticalScrollBar().sizeHint().width()
+
+    def sizeHint(self) -> QSize:
+        return self.widget().sizeHint() + QSize(self._bar(), 0)     # opens with every card in sight
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(max(self.LEAST, self.widget().minimumSizeHint().width() + self._bar()), 0)
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self.widget() and event.type() == QEvent.LayoutRequest:
+            self.updateGeometry()                   # a card's buttons changed: its least width may have
+        return False
 
 
 class LauncherWindow(QWidget):
@@ -309,7 +339,7 @@ class LauncherWindow(QWidget):
         super().__init__()
         self.setWindowTitle('Hanami')
         self.setWindowIcon(icons.app_icon())
-        self.setMinimumWidth(700)
+        self.setMinimumHeight(400)                  # a row of cards at least; the rest scroll
         self.setObjectName('launcher')
         theme.frost(self, backdrop=theme.BACKDROP)
         theme.closes_on_escape(self)
@@ -337,6 +367,13 @@ class LauncherWindow(QWidget):
         top.addWidget(self.settings, 0, Qt.AlignVCenter)
         layout.addLayout(top)
 
+        # The cards scroll in a pane of their own. Straight in the window, their wrapped words gave
+        # it a least height for each width, and Qt trimmed every drag to fit it: a corner drag
+        # moved one side only, and an edge drag stopped short.
+        holder = QWidget()
+        holder.setObjectName('cards')
+        stack = QVBoxLayout(holder)
+        stack.setContentsMargins(0, 0, 0, 0)
         grid = QGridLayout()
         grid.setSpacing(16)                         # as from the header to the cards: even
         self.cards: dict[str, AppCard] = {}
@@ -356,8 +393,10 @@ class LauncherWindow(QWidget):
             grid.setColumnStretch(column, 1)
         self.grid = grid
         self._arranged = [app.name for app in SUITE]
-        layout.addLayout(grid)
-        layout.addStretch(1)
+        stack.addLayout(grid)
+        stack.addStretch(1)
+        self.cards_area = _CardsArea(holder)
+        layout.addWidget(self.cards_area, 1)
 
         self.foot = _label('', theme.TYPE['caption'], role='dim')
         self.foot.setTextFormat(Qt.RichText)
@@ -403,6 +442,7 @@ class LauncherWindow(QWidget):
         c = theme.colors()
         return theme.card_style() + theme.panel_css('QFrame#card', 12) + f"""
             QWidget#launcher {{ background: {theme.css(c.card)}; }}
+            QScrollArea#cards, QScrollArea#cards > QWidget, QWidget#cards {{ background: transparent; }}
             QToolButton#settingsButton {{ color: {c.text.name()}; padding: 0px; }}
             QToolButton#moreButton, QToolButton#moreButton:hover {{ border: none; padding: 0px; }}
         """

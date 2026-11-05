@@ -197,12 +197,14 @@ class SettingsWindow(QWidget):
         frame = suitesettings.SettingsFrame(self, icons.render_app_icon(28))
         self.nav, self.pages = frame.nav, frame.pages
         made = [self._general(start_with, starts_with_windows),
-                self._scrolled(self._edge_panel(panel_edge, tab, list(pinned or []), panel_pages, brightness_on,
-                                                panel_buttons, panel_hidden or [])),
+                self._edge_panel(panel_edge, tab, list(pinned or []), panel_pages, brightness_on,
+                                 panel_buttons, panel_hidden or []),
                 self._appearance(), self._games(), self._sound(*sound, window_sound), self._screen_text(*text),
                 self._updates(*updates), self._about()]
+        # Every page scrolls, as the other apps' do: one that didn't gave the window a least height
+        # for each width, and Qt trimmed resizing drags to it.
         for (mark, title), widget in zip(self.PAGES, made):
-            frame.add_widget(mark, title, widget)
+            frame.add_widget(mark, title, self._scrolled(widget))
         theme.on_restyle(self._appearance_changed)
 
     def open_page(self, name: str) -> None:

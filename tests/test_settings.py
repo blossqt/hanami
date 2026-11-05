@@ -712,6 +712,24 @@ class SelfUpdateTests(_Controlled):
         finally:
             window.close()
 
+    def test_windows_resize_freely(self):
+        """No least height for each width at a window's top: Qt trims resizing drags to one (the
+        user's corner drags moved one side only). And a card's update() is still its own."""
+        from hanami.ui.launcher import LauncherWindow
+        launcher = LauncherWindow()
+        window = SettingsWindow([], False, (True, True, False, True), (True, hanami.SOUND_HOTKEY), 'right')
+        try:
+            for name, shown in (('launcher', launcher), ('settings', window)):
+                for page in ([title for _, title in SettingsWindow.PAGES] if shown is window else ['']):
+                    if page:
+                        window.open_page(page)
+                    self.assertFalse(shown.layout().hasHeightForWidth(), f'{name} {page}')
+            card = next(iter(launcher.cards.values()))
+            card.update()                           # (it raised while a button sat in its place)
+        finally:
+            launcher.close()
+            window.close()
+
     def test_one_choice_for_the_apps_updates(self):
         for kept, shown in (((True, True, False), 'tell'), ((True, True, True), 'install'),
                             ((False, True, True), 'off')):
