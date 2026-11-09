@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QProgressBar,
-                               QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget)
+                               QPushButton, QScrollArea, QSizePolicy, QSpacerItem, QToolButton, QVBoxLayout,
+                               QWidget)
 
 from .. import __version__, win32
 from ..catalog import SUITE
@@ -65,6 +66,20 @@ class CardState:
     starting: bool = False          # started a moment ago, and not up yet
 
 
+# How much of a card shows, roomiest first: the window takes the first that fits it, so nothing is
+# ever cut off. FULL: what the app does and its buttons under its name. BRIEF: without what it does.
+# LINE: one line, its buttons beside its name. ICONS: the same, with the buttons as icons.
+FULL, BRIEF, LINE, ICONS = range(4)
+TIERS = (FULL, BRIEF, LINE, ICONS)
+_ROOMY_PAD, _SLIM_PAD = 16, 12          # a card's padding
+_ROOMY_MARGIN, _SLIM_MARGIN = 24, 16    # the window's
+_ROOMY_GAP, _SLIM_GAP = 16, 8           # between cards
+_ICON = 44
+_NO_LIMIT = 16777215                    # Qt's QWIDGETSIZE_MAX, which PySide doesn't export
+_ICON_BUTTON = 30                       # a button's width, as an icon
+_BUTTON_PADDING = 40                    # a button's width, past its words
+_TRAY_WORDS = 'Closing this window keeps Hanami in the tray.'
+
 _BUSY = {'download': 'Downloading', 'unpack': 'Unpacking', 'check': 'Checking it starts',
          'place': 'Putting it in place', 'quit': 'Waiting for it to quit', 'remove': 'Removing it'}
 
@@ -116,26 +131,32 @@ class AppCard(QFrame):
         super().__init__()
         self.app = app
         self.setObjectName('card')
-        layout = QHBoxLayout(self)
+        self._tier = FULL
+        self._button_h = 30
+        self._words: list[str] = []     # on the buttons in sight
+        self._about_h = (-1, 0)         # (width, the height what it does takes there)
+        self._menu_for = None
+        layout = self.row = QHBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(16)
         self.icon = QLabel()
-        self.icon.setFixedSize(44, 44)
+        self.icon.setFixedSize(_ICON, _ICON)
         layout.addWidget(self.icon, 0, Qt.AlignTop)   # its top level with the top of the name's capitals (the user's wish)
         # The gaps the eye sees (Keytap\.dev\spacing\BRIEF.md), 16 between the name
         # and what the app does and between that and the buttons (the user's wish: the same), 16
         # padding all round. The buttons sit at the foot, so a row of cards has them on one line.
-        text = QVBoxLayout()
+        text = self.column = QVBoxLayout()
         text.setSpacing(0)
-        heading = QHBoxLayout()
+        heading = self.heading = QHBoxLayout()
         heading.setSpacing(8)
-        name = _serif(app.name, 13)
+        name = self.name = _serif(app.name, 13)
         heading.addWidget(name, 0, Qt.AlignTop)
         self.version = _label('', theme.TYPE['caption'], role='dim')
         # Centred on the name's capitals (the user's wish), not on its baseline: both boxes are their
         # ink, the name's from the top of its capitals
-        cap = QFontMetricsF(name.font()).capHeight()
-        self.version.setContentsMargins(0, max(0, round((cap - QFontMetricsF(self.version.font()).capHeight()) / 2)), 0, 0)
+        cap = self._cap = QFontMetricsF(name.font()).capHeight()
+        self._version_drop = max(0, round((cap - QFontMetricsF(self.version.font()).capHeight()) / 2))
+        self.version.setContentsMargins(0, self._version_drop, 0, 0)
         heading.addWidget(self.version, 0, Qt.AlignTop)
         heading.addStretch(1)
         corner = QHBoxLayout()                      # the dot right by the ⋯, which its own padding parts it from
@@ -157,8 +178,9 @@ class AppCard(QFrame):
         corner.addWidget(self.more, 0, Qt.AlignTop)
         heading.addLayout(corner)
         text.addLayout(heading)
-        text.addSpacing(16)
-        about = _label(app.description, theme.TYPE['small'], role='dim')
+        self.gap_name = QSpacerItem(0, 16, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        text.addItem(self.gap_name)
+        about = self.about = _label(app.description, theme.TYPE['small'], role='dim')
         about.setWordWrap(True)
         text.addWidget(about)
         self.status = QWidget()                     # only while there is something to say: an install, a problem
@@ -175,7 +197,7 @@ class AppCard(QFrame):
         status.addWidget(self.progress)
         text.addWidget(self.status)
         text.addStretch(1)                          # spare height above the buttons, never under
-        buttons = QHBoxLayout()
+        buttons = self.actions = QHBoxLayout()
         buttons.setSpacing(8)
         self.open = QPushButton('Open')             # pink only as Install: Open and Start are routine
         self.open.clicked.connect(self._primary)
@@ -189,13 +211,130 @@ class AppCard(QFrame):
         for button in (self.open, self.update_button, self.quit, self.cancel):
             button.setCursor(Qt.PointingHandCursor)
             buttons.addWidget(button)
-        buttons.addStretch(1)
-        text.addSpacing(16)
+        self.push = QSpacerItem(0, 0, QSizePolicy.Expanding, QSizePolicy.Minimum)     # to the left, under the name
+        buttons.addItem(self.push)
+        self.gap_actions = QSpacerItem(0, 16, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        text.addItem(self.gap_actions)
         text.addLayout(buttons)
         layout.addLayout(text, 1)
         self._exe = None
         self._state = CardState()
         self._shown = None              # the state last shown, and the colours it was shown in
+
+    # ---------------------------------------------------------------- how much of it shows
+    def _slim_button_h(self) -> int:
+        if self._tier != ICONS:         # as an icon it has no words to be measured by
+            self.quit.ensurePolished()
+            self._button_h = self.quit.sizeHint().height()
+        return self._button_h
+
+    def slim_height(self) -> int:
+        return self._border() + 2 * _SLIM_PAD + self._slim_button_h()
+
+    def _border(self) -> int:
+        self.ensurePolished()
+        return self.width() - self.contentsRect().width()
+
+    def _status_height(self, width: int, gap: int) -> int:
+        if not self.status.isVisibleTo(self):
+            return 0
+        layout = self.status.layout()
+        total = layout.totalHeightForWidth(width) if layout.hasHeightForWidth() else layout.totalSizeHint().height()
+        return total - layout.contentsMargins().top() + gap
+
+    def _buttons_width(self, icons_only: bool) -> int:
+        if not self._words:
+            return 0
+        metrics = self.open.fontMetrics()
+        each = [_ICON_BUTTON if icons_only else metrics.horizontalAdvance(w) + _BUTTON_PADDING for w in self._words]
+        return sum(each) + 8 * (len(each) - 1)
+
+    def least_width(self, tier: int) -> int:
+        """The narrowest this card reads at, showing that much."""
+        self.name.ensurePolished()
+        title = self.name.sizeHint().width()
+        if tier != ICONS:
+            title += 8 + self.version.sizeHint().width()
+        corner = 8 + 8 + 28             # the dot and the ⋯, and what parts them from the name
+        if tier <= BRIEF:
+            return self._border() + 2 * _ROOMY_PAD + _ICON + 16 + max(title + corner, self._buttons_width(False))
+        return (self._border() + 2 * _SLIM_PAD + self._slim_button_h() + 12 + title + 8
+                + self._buttons_width(tier == ICONS) + corner)
+
+    def height_for(self, tier: int, width: int) -> int:
+        """How tall this card is, showing that much, at that width."""
+        if tier >= LINE:
+            inner = width - self._border() - 2 * _SLIM_PAD - self._slim_button_h() - 12
+            return self.slim_height() + self._status_height(inner, 8)
+        inner = width - self._border() - 2 * _ROOMY_PAD - _ICON - 16
+        height = max(self.name.sizeHint().height(), round(self._cap)) + 16 + self._slim_button_h()
+        height += self._status_height(inner, 16)
+        if tier == FULL:
+            if self._about_h[0] != inner:
+                self._about_h = (inner, self.about.heightForWidth(inner))
+            height += self._about_h[1] + 16
+        return self._border() + 2 * _ROOMY_PAD + max(height, _ICON)
+
+    def set_tier(self, tier: int) -> None:
+        if tier == self._tier:
+            return
+        button_h = self._slim_button_h()    # before it may become an icon
+        was_slim, slim = self._tier >= LINE, tier >= LINE
+        was_icons, icons = self._tier == ICONS, tier == ICONS
+        self._tier = tier
+        if slim != was_slim:
+            if slim:
+                self.column.removeItem(self.actions)
+                self.heading.insertLayout(3, self.actions)      # after the name, its version and the stretch
+            else:
+                self.heading.removeItem(self.actions)
+                self.column.addLayout(self.actions)
+            self.push.changeSize(0, 0, QSizePolicy.Fixed if slim else QSizePolicy.Expanding, QSizePolicy.Minimum)
+            pad = _SLIM_PAD if slim else _ROOMY_PAD
+            self.row.setContentsMargins(pad, pad, pad, pad)
+            self.row.setSpacing(12 if slim else 16)
+            self.gap_actions.changeSize(0, 0 if slim else 16, QSizePolicy.Minimum, QSizePolicy.Fixed)
+            self.status.layout().setContentsMargins(0, 8 if slim else 16, 0, 0)
+            # one line, the name's capitals level with the middle of the buttons
+            row = button_h if slim else round(self._cap)
+            drop = (button_h - round(self._cap)) // 2 if slim else 0
+            self.name.setContentsMargins(0, drop, 0, 0)
+            self.version.setContentsMargins(0, drop + self._version_drop, 0, 0)
+            self.dot.setFixedHeight(row)
+            self.more.setFixedSize(28, row)
+            size = button_h if slim else _ICON
+            self.icon.setFixedSize(size, size)
+            self._exe = None                # drawn afresh at its new size
+        self.about.setVisible(tier == FULL)
+        self.version.setVisible(tier != ICONS)
+        self.gap_name.changeSize(0, 16 if tier == FULL else 0, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        if icons != was_icons:
+            for button in (self.open, self.update_button, self.quit, self.cancel):
+                button.setProperty('slim', icons)
+                button.style().unpolish(button)
+                button.style().polish(button)
+                if icons:
+                    button.setFixedSize(_ICON_BUTTON, button_h)
+                else:
+                    button.setMinimumSize(0, 0)
+                    button.setMaximumSize(_NO_LIMIT, _NO_LIMIT)
+        self.layout().invalidate()
+        self.column.invalidate()
+        self._shown = None
+        self.show_state(self._state)
+
+    def _dress(self, button: QPushButton, words: str, mark: str, tip: str = '') -> None:
+        """A button's words, or its icon where there is room for only that."""
+        if self._tier == ICONS:
+            ink = theme.ON_ACCENT if button.property('role') == 'primary' else theme.colors().text
+            button.setText('')
+            button.setIcon(suiteicons.icon(mark, ink, 16))
+            button.setIconSize(QSize(16, 16))
+            button.setToolTip(tip or words)
+        else:
+            button.setIcon(QIcon())
+            button.setText(words)
+            button.setToolTip(tip)
 
     def _primary(self) -> None:
         if self._state.exe is None:
@@ -213,12 +352,13 @@ class AppCard(QFrame):
             return
         self._exe = key
         ratio = self.devicePixelRatioF()
-        image = win32.exe_icon(exe, round(44 * ratio)) if key else None
+        size = self.icon.width()
+        image = win32.exe_icon(exe, round(size * ratio)) if key else None
         if image is not None:
             pixmap = QPixmap.fromImage(image)
             pixmap.setDevicePixelRatio(ratio)
         else:
-            pixmap = placeholder_icon(self.app.name, 44)
+            pixmap = placeholder_icon(self.app.name, size)
         self.icon.setPixmap(pixmap)
 
     def _more_icon(self) -> None:
@@ -235,7 +375,8 @@ class AppCard(QFrame):
         shown = (s, theme.colors().dim.name(), theme.ink())
         if shown == self._shown:
             return
-        rebuild_menu = self._shown is None or self._shown[0].installed != s.installed
+        rebuild_menu = self._menu_for != s.installed
+        self._menu_for = s.installed
         self._shown = shown
         self._state = s
         self._show_icon(s.exe)
@@ -265,22 +406,25 @@ class AppCard(QFrame):
             self.progress.setRange(0, 1000 if fraction else 0)
             if fraction:
                 self.progress.setValue(int(1000 * s.done / s.total))
-        self.open.setText('Install' if s.exe is None else 'Open' if s.running
-                          else 'Starting…' if s.starting else 'Start')
+        words = 'Install' if s.exe is None else 'Open' if s.running else 'Starting…' if s.starting else 'Start'
         primary = 'primary' if s.exe is None else ''
         if self.open.property('role') != primary:
             self.open.setProperty('role', primary)
             self.open.style().unpolish(self.open)
             self.open.style().polish(self.open)
+        self._dress(self.open, words, 'download' if s.exe is None else 'external' if s.running else 'play')
         self.open.setEnabled(not s.starting)
         self.open.setVisible(not busy)
         # 'Update to 0.2.36' didn't fit beside Open and Quit on a laptop's narrower cards, and was cut
         # at both ends: the button says Update, and its tooltip which version
-        self.update_button.setText('Update')
-        self.update_button.setToolTip(f'Update to {s.latest}' if s.latest else '')
+        self._dress(self.update_button, 'Update', 'refresh', f'Update to {s.latest}' if s.latest else '')
         self.update_button.setVisible(s.update and not busy)
+        self._dress(self.quit, 'Quit', 'cross')
         self.quit.setVisible(s.in_tray and not busy)
+        self._dress(self.cancel, 'Cancel', 'cross')
         self.cancel.setVisible(busy and s.busy in ('download', 'unpack', 'quit'))
+        self._words = [w for w, on in ((words, not busy), ('Update', s.update and not busy), ('Quit', s.in_tray and not busy),
+                                       ('Cancel', busy and s.busy in ('download', 'unpack', 'quit'))) if on]
         self.more.setVisible(not busy)
 
         if not rebuild_menu:
@@ -294,10 +438,12 @@ class AppCard(QFrame):
 
 
 class _CardsArea(QScrollArea):
-    """The cards, scrolled up and down only: as wide as they need at least (so the window is too),
-    as tall as they like when there is room, and as short as the window is made."""
+    """The cards, scrolled up and down only, and that only when a card has more to say than fits
+    (an install's progress, in the smallest window): the window keeps them in sight by showing less
+    of each. A pane of its own: straight in the window, their wrapped words gave it a least height
+    for each width, and Qt trimmed every drag to fit it."""
 
-    LEAST = 652                 # the window at 700 wide at least, less its margins (24 each side)
+    relaid = Signal()
 
     def __init__(self, cards: QWidget):
         super().__init__()
@@ -315,11 +461,12 @@ class _CardsArea(QScrollArea):
         return self.widget().sizeHint() + QSize(self._bar(), 0)     # opens with every card in sight
 
     def minimumSizeHint(self) -> QSize:
-        return QSize(max(self.LEAST, self.widget().minimumSizeHint().width() + self._bar()), 0)
+        return QSize(0, 0)                          # the window's own least size sees to this
 
     def eventFilter(self, obj, event) -> bool:
         if obj is self.widget() and event.type() == QEvent.LayoutRequest:
-            self.updateGeometry()                   # a card's buttons changed: its least width may have
+            self.updateGeometry()
+            self.relaid.emit()                      # a card's buttons or status changed
         return False
 
 
@@ -339,15 +486,17 @@ class LauncherWindow(QWidget):
         super().__init__()
         self.setWindowTitle('Hanami')
         self.setWindowIcon(icons.app_icon())
-        self.setMinimumHeight(400)                  # a row of cards at least; the rest scroll
         self.setObjectName('launcher')
         theme.frost(self, backdrop=theme.BACKDROP)
         theme.closes_on_escape(self)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setContentsMargins(_ROOMY_MARGIN, _ROOMY_MARGIN, _ROOMY_MARGIN, _ROOMY_MARGIN)
         layout.setSpacing(16)
+        self._tier = FULL
+        self._fitting = False
+        self._foot = ('', '', '')       # the footer whole, as plain words, and without the line about the tray
 
-        top = QHBoxLayout()
+        top = self.top = QHBoxLayout()
         top.setSpacing(12)
         logo = QLabel()
         logo.setPixmap(icons.render_app_icon(40))
@@ -367,9 +516,6 @@ class LauncherWindow(QWidget):
         top.addWidget(self.settings, 0, Qt.AlignVCenter)
         layout.addLayout(top)
 
-        # The cards scroll in a pane of their own. Straight in the window, their wrapped words gave
-        # it a least height for each width, and Qt trimmed every drag to fit it: a corner drag
-        # moved one side only, and an edge drag stopped short.
         holder = QWidget()
         holder.setObjectName('cards')
         stack = QVBoxLayout(holder)
@@ -396,10 +542,12 @@ class LauncherWindow(QWidget):
         stack.addLayout(grid)
         stack.addStretch(1)
         self.cards_area = _CardsArea(holder)
+        self.cards_area.relaid.connect(self._fit)
         layout.addWidget(self.cards_area, 1)
 
         self.foot = _label('', theme.TYPE['caption'], role='dim')
         self.foot.setTextFormat(Qt.RichText)
+        self.foot.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)     # the window may be narrower than its words
         self.foot.linkActivated.connect(lambda link: self.update_hanami.emit() if link == 'update'
                                         else self.show_page.emit('Hanami'))
         layout.addWidget(self.foot)
@@ -418,6 +566,68 @@ class LauncherWindow(QWidget):
             self.grid.addWidget(self.cards[name], index // 2, index % 2)
         for name, card in self.cards.items():
             card.setVisible(name in names)
+        self._fit()
+
+    # ---------------------------------------------------------------- showing less as it shrinks
+    def _rows(self) -> list[list[AppCard]]:
+        cards = [self.cards[name] for name in self._arranged]
+        return [cards[i:i + 2] for i in range(0, len(cards), 2)]
+
+    def _fit(self) -> None:
+        """How much of each card shows: the most that keeps every card whole in this window. Worked
+        out from the window's size alone, so what it chooses can't change what it would choose."""
+        if self._fitting or not self.isVisible():
+            return
+        self._fitting = True
+        try:
+            rows = self._rows()
+            cards = [card for row in rows for card in row]
+            if not cards:
+                return
+            chrome = self.top.sizeHint().height() + self.foot.sizeHint().height() + 2 * 16
+            self._hold_minimum(rows, cards, chrome)
+            tier = ICONS
+            for choice in TIERS:
+                margin = _SLIM_MARGIN if choice >= LINE else _ROOMY_MARGIN
+                gap = _SLIM_GAP if choice >= LINE else _ROOMY_GAP
+                width = (self.width() - 2 * margin - gap) // 2
+                room = self.height() - 2 * margin - chrome
+                tall = sum(max(c.height_for(choice, width) for c in row) for row in rows) + gap * (len(rows) - 1)
+                if tall <= room and all(c.least_width(choice) <= width for c in cards):
+                    tier = choice
+                    break
+            self._show_tier(tier, cards)
+            self._show_foot()
+        finally:
+            self._fitting = False
+
+    def _hold_minimum(self, rows, cards, chrome: int) -> None:
+        """The window goes no smaller than every card on one line, buttons as icons."""
+        width = 2 * max(c.least_width(ICONS) for c in cards) + _SLIM_GAP + 2 * _SLIM_MARGIN
+        height = (sum(max(c.slim_height() for c in row) for row in rows) + _SLIM_GAP * (len(rows) - 1)
+                  + 2 * _SLIM_MARGIN + chrome)
+        if (self.minimumWidth(), self.minimumHeight()) != (width, height):
+            self.setMinimumSize(width, height)
+
+    def _show_tier(self, tier: int, cards: list) -> None:
+        for card in self.cards.values():        # those out of sight too, ready for when they are shown
+            card.set_tier(tier)
+        if tier == self._tier:
+            return
+        self._tier = tier
+        margin = _SLIM_MARGIN if tier >= LINE else _ROOMY_MARGIN
+        self.layout().setContentsMargins(margin, margin, margin, margin)
+        self.grid.setSpacing(_SLIM_GAP if tier >= LINE else _ROOMY_GAP)
+        self.grid.invalidate()
+        self.layout().activate()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._fit()
 
     def _settings_icon(self) -> None:
         self.settings.setIcon(suiteicons.icon('gear', theme.colors().text, 18))
@@ -426,17 +636,33 @@ class LauncherWindow(QWidget):
     def show_hanami(self, newer: str, updating: str = '', can_update: bool = False, waiting: bool = False) -> None:
         """The footer: Hanami's version, and a newer one if there is one - to update to here (or,
         run from source, to see on GitHub) - or the one being put in."""
-        words = f'Hanami {__version__}  ·  Closing this window keeps Hanami in the tray.'
+        name = f'Hanami {__version__}'
         link = f'style="color:{theme.ink()}; text-decoration:none"'
+        plain = note = ''
         if updating and waiting:              # put in by itself, waiting for Hanami to be out of use
-            words += f'  ·  <a href="update" {link}>Hanami {updating} is ready - restart to update</a>'
+            plain = f'Hanami {updating} is ready - restart to update'
+            note = f'<a href="update" {link}>{plain}</a>'
         elif updating:
-            words += f'  ·  Updating to Hanami {updating}…'
+            plain = note = f'Updating to Hanami {updating}…'
         elif newer and can_update:
-            words += f'  ·  <a href="update" {link}>Hanami {newer} is out - update</a>'
+            plain = f'Hanami {newer} is out - update'
+            note = f'<a href="update" {link}>{plain}</a>'
         elif newer:
-            words += f'  ·  <a href="hanami" {link}>Hanami {newer} is out - get it</a>'
-        self.foot.setText(words)
+            plain = f'Hanami {newer} is out - get it'
+            note = f'<a href="hanami" {link}>{plain}</a>'
+        apart = '  ·  '
+        self._foot = (name + apart + _TRAY_WORDS + (apart + note if note else ''),
+                      name + apart + _TRAY_WORDS + (apart + plain if plain else ''),
+                      name + (apart + note if note else ''))
+        self._show_foot()
+
+    def _show_foot(self) -> None:
+        """The footer, the line about the tray left out when the window is too narrow for it."""
+        whole, plain, short = self._foot
+        margin = _SLIM_MARGIN if self._tier >= LINE else _ROOMY_MARGIN
+        words = whole if self.foot.fontMetrics().horizontalAdvance(plain) <= self.width() - 2 * margin else short
+        if self.foot.text() != words:
+            self.foot.setText(words)
 
     def _style(self) -> str:
         c = theme.colors()
@@ -445,6 +671,7 @@ class LauncherWindow(QWidget):
             QScrollArea#cards, QScrollArea#cards > QWidget, QWidget#cards {{ background: transparent; }}
             QToolButton#settingsButton {{ color: {c.text.name()}; padding: 0px; }}
             QToolButton#moreButton, QToolButton#moreButton:hover {{ border: none; padding: 0px; }}
+            QPushButton[slim="true"] {{ padding: 0px; }}
         """
 
     def _locate(self, name: str) -> None:

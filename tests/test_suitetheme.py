@@ -811,29 +811,17 @@ class WallTests(unittest.TestCase):
             changed.assert_not_called()
 
 
-class FocusRingTests(unittest.TestCase):
-    def setUp(self):
-        self.window = QWidget()
-        layout = QVBoxLayout(self.window)
-        self.first, self.second = QPushButton('One'), QPushButton('Two')
-        layout.addWidget(self.first)
-        layout.addWidget(self.second)
-        self.window.show()
-        app.processEvents()
+class NoOutlineTests(unittest.TestCase):
+    def test_no_focus_rectangle_is_drawn(self):
+        from unittest.mock import MagicMock
+        from PySide6.QtWidgets import QStyle, QStyleOption
+        painter = MagicMock()
+        suitetheme.SuiteStyle().drawPrimitive(QStyle.PE_FrameFocusRect, QStyleOption(), painter)
+        painter.assert_not_called()
 
-    def tearDown(self):
-        self.window.close()
-        suitetheme._focus()._hide()
-
-    def test_a_ring_for_the_keyboard_none_for_the_mouse(self):
-        from PySide6.QtGui import QFocusEvent
-        ring = suitetheme._focus()
-        ring.eventFilter(self.second, QFocusEvent(QFocusEvent.Type.FocusIn, Qt.TabFocusReason))
-        self.assertIs(ring._on, self.second)
-        self.assertTrue(ring._ring.isVisible())
-        self.assertGreater(ring._ring.width(), self.second.width())
-        ring.eventFilter(self.first, QFocusEvent(QFocusEvent.Type.FocusIn, Qt.MouseFocusReason))
-        self.assertIsNone(ring._ring)
+    def test_nothing_rings_what_the_keyboard_reaches(self):
+        self.assertFalse(hasattr(suitetheme, '_Focus'))
+        self.assertFalse(hasattr(suitetheme, '_Ring'))
 
 
 class PressTests(unittest.TestCase):

@@ -1473,5 +1473,62 @@ class WindowThreadTests(_Controlled):
         self.assertNotIn(named, hanami.win32.running_programs(), 'gone once it has')
 
 
+class CompactCardsTests(unittest.TestCase):
+    """The window shows less of each card as it shrinks, and never cuts one off."""
+
+    def setUp(self):
+        from pathlib import Path
+        from hanami.ui.launcher import CardState, LauncherWindow
+        self.window = LauncherWindow()
+        exe = Path(sys.executable)
+        self.names = [n for n in self.window.cards][:5]
+        self.window.arrange(self.names)
+        for name in self.names:
+            self.window.cards[name].show_state(CardState(exe=exe, running=True, in_tray=True, version='1.2.3', installed=True))
+        self.window.show()
+        self.addCleanup(self.window.close)
+
+    def size(self, width, height):
+        self.window.resize(width, height)
+        for _ in range(3):
+            QApplication.processEvents()
+
+    def test_no_card_is_cut_off_at_any_size(self):
+        window = self.window
+        for width in range(window.minimumWidth(), 1100, 90):
+            for height in range(window.minimumHeight(), 820, 45):
+                self.size(width, height)
+                self.assertEqual(window.cards_area.verticalScrollBar().maximum(), 0, (width, height))
+                for card in window.cards.values():
+                    if card.isVisible():
+                        self.assertLessEqual(card.geometry().right(), window.cards_area.viewport().width(), (width, height))
+
+    def test_it_shows_less_as_it_shrinks_and_more_again(self):
+        from hanami.ui import launcher
+        window = self.window
+        card = window.cards[self.names[0]]
+        self.size(1000, 900)
+        self.assertEqual(window._tier, launcher.FULL)
+        self.assertTrue(card.about.isVisible())
+        self.size(1000, window.minimumHeight())
+        self.assertGreaterEqual(window._tier, launcher.LINE)
+        self.assertFalse(card.about.isVisible())
+        self.size(1000, 900)
+        self.assertEqual(window._tier, launcher.FULL)
+        self.assertEqual(card.quit.text(), 'Quit')
+
+    def test_a_button_shown_as_an_icon_still_says_what_it_does(self):
+        from hanami.ui import launcher
+        window = self.window
+        card = window.cards[self.names[0]]
+        self.size(window.minimumWidth(), window.minimumHeight())
+        self.assertEqual(window._tier, launcher.ICONS)
+        self.assertEqual(card.quit.text(), '')
+        self.assertFalse(card.quit.icon().isNull())
+        self.assertEqual(card.quit.toolTip(), 'Quit')
+        self.assertEqual(card.open.toolTip(), 'Open')
+
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

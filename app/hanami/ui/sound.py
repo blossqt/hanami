@@ -125,10 +125,6 @@ class SoundToggle(QWidget):
             lit = self._at is not None and abs(self._at - index) < 0.5
             draw_mark(painter, QRectF(r.x() + 3 + index * half, r.y(), half, r.height()), glyph,
                       QColor(theme.ON_ACCENT) if lit else c.text if self._hover and index == target else c.dim, size)
-        if self.hasFocus():
-            painter.setPen(QPen(c.edge, 1.5))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawPath(track)
         painter.end()
 
 
@@ -206,10 +202,6 @@ class MicButton(QWidget):
         else:
             painter.setPen(c.text if self._hover else c.dim)
         draw_mark(painter, QRectF(r), MIC_OFF if self.muted else MIC, painter.pen().color(), 18)
-        if self.hasFocus():
-            painter.setPen(QPen(c.edge, 1.5))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawPath(shape)
         painter.end()
 
 
