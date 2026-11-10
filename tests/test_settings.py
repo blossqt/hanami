@@ -1570,6 +1570,73 @@ class FootCheckTests(unittest.TestCase):
         self.assertIn('href="check"', self.window.foot.text())
 
 
+class MorphTests(unittest.TestCase):
+    """The window's changes play as one movement, then leave nothing behind."""
+
+    def setUp(self):
+        from unittest import mock
+        from hanami.ui import suitetheme
+        from hanami.ui.launcher import CardState, LauncherWindow
+        from hanami.ui import theme      # the launcher asks theme, which took suitetheme's names
+        patches = [mock.patch.object(theme, 'motion_on', lambda: True),
+                   mock.patch.object(suitetheme, 'game_in_front', lambda: False)]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.CardState = CardState
+        self.window = LauncherWindow()
+        self.names = [n for n in self.window.cards][:5]
+        self.window.arrange(self.names)
+        for name in self.names:
+            self.window.cards[name].show_state(CardState(exe=Path(sys.executable), version='1.0.0', installed=True))
+        self.window.resize(1000, 900)
+        self.window.show()
+        self.addCleanup(self.window.close)
+        self.settle(0.3)
+
+    def settle(self, seconds):
+        end = time.perf_counter() + seconds
+        while time.perf_counter() < end:
+            QApplication.processEvents()
+
+    def plays_then_clears(self, change):
+        morph = self.window.morph
+        change()
+        self.settle(0.05)
+        self.assertTrue(morph.isVisible(), 'it moves')
+        self.assertIsNotNone(self.window.cards_area.widget().graphicsEffect(), 'the cards wait under it')
+        self.settle(0.6)
+        self.assertFalse(morph.isVisible(), 'and is over')
+        self.assertIsNone(self.window.cards_area.widget().graphicsEffect(), 'the cards are back as they are')
+
+    def test_compacting_and_back(self):
+        self.plays_then_clears(lambda: self.window.resize(1000, self.window.minimumHeight()))
+        self.plays_then_clears(lambda: self.window.resize(1000, 900))
+
+    def test_a_cards_buttons_changing(self):
+        card = self.window.cards[self.names[0]]
+        self.plays_then_clears(lambda: card.show_state(
+            self.CardState(exe=Path(sys.executable), version='1.0.0', latest='2.0.0', update=True, installed=True)))
+
+    def test_nothing_moves_for_an_installs_progress(self):
+        card = self.window.cards[self.names[0]]
+        card.show_state(self.CardState(exe=Path(sys.executable), version='1.0.0', installed=True, busy='download',
+                                       done=1, total=10))
+        self.settle(0.6)
+        card.show_state(self.CardState(exe=Path(sys.executable), version='1.0.0', installed=True, busy='download',
+                                       done=5, total=10))
+        self.settle(0.02)
+        self.assertFalse(self.window.morph.isVisible())
+
+    def test_not_with_animations_off(self):
+        from unittest import mock
+        from hanami.ui import theme
+        with mock.patch.object(theme, 'motion_on', lambda: False):
+            self.window.resize(1000, self.window.minimumHeight())
+            self.settle(0.05)
+            self.assertFalse(self.window.morph.isVisible())
+
+
 class CompactCardsTests(unittest.TestCase):
     """The window shows less of each card as it shrinks, and never cuts one off."""
 

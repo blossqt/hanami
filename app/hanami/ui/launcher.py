@@ -6,9 +6,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QProgressBar,
+from PySide6.QtWidgets import (QFileDialog, QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel,
+                               QMenu, QProgressBar,
                                QPushButton, QScrollArea, QSizePolicy, QSpacerItem, QToolButton, QVBoxLayout,
                                QWidget)
 
@@ -136,6 +137,8 @@ class AppCard(QFrame):
         self._words: list[str] = []     # on the buttons in sight
         self._about_h = (-1, 0)         # (width, the height what it does takes there)
         self._menu_for = None
+        self._shape = None              # what it shows, as far as its size and buttons go
+        self.before_change = None       # called just before that changes: the window's morph
         layout = self.row = QHBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(16)
@@ -375,6 +378,12 @@ class AppCard(QFrame):
         shown = (s, theme.colors().dim.name(), theme.ink())
         if shown == self._shown:
             return
+        busy = bool(s.busy)
+        shape = (s.exe is None, s.running, s.starting, s.update and not busy, s.in_tray and not busy, busy,
+                 bool(s.problem), bool(s.version))     # not an install's progress, which moves all along
+        if self._shape is not None and shape != self._shape and self.before_change is not None:
+            self.before_change()
+        self._shape = shape
         rebuild_menu = self._menu_for != s.installed
         self._menu_for = s.installed
         self._shown = shown
@@ -435,6 +444,110 @@ class AppCard(QFrame):
         if s.installed:
             self.menu.addSeparator()
             self.menu.addAction(f'Uninstall {self.app.name}', lambda: self.uninstall_clicked.emit(self.app.name))
+
+
+class _Morph(QWidget):
+    """The cards' change as one movement rather than a jump. Just before the window shows less or
+    more of each card, rearranges them or a card's buttons change, each card is pictured as it is,
+    and again once the change is laid out. Each card then travels as one shape from where it was to
+    where it is, its old look fading into its new one on the way, and the cards themselves come back
+    once it has arrived. Drawn over the window, letting the mouse through."""
+
+    def __init__(self, window: QWidget, holder: QWidget, cards: dict, area: QScrollArea):
+        super().__init__(window)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.hide()
+        self._window, self._holder, self._cards, self._area = window, holder, cards, area
+        self._was: dict = {}            # card: (where it was in the window, its picture then)
+        self._now: dict = {}            # card: its picture now
+        self._t = 1.0
+        self._run = None
+        self._hidden = None
+        self._pending = False
+
+    def capture(self) -> None:
+        """Picture the cards as they are, just before a change; the change plays once it is laid out."""
+        if self._pending or not self._window.isVisible() or not theme.motion_on():
+            return
+        self.finish()
+        self._was = {card: (self._where(card), card.grab()) for card in self._cards.values() if card.isVisible()}
+        if self._was:
+            self._pending = True
+            QTimer.singleShot(0, self._play)
+
+    def _where(self, card: QWidget) -> QRectF:
+        return QRectF(card.mapTo(self._window, QPoint(0, 0)), card.size())
+
+    def _play(self) -> None:
+        self._pending = False
+        if not self._was or not self._window.isVisible():
+            self._was = {}
+            return
+        self._now = {card: card.grab() for card in self._cards.values() if card.isVisible()}
+        self._hidden = QGraphicsOpacityEffect(self._holder)     # the cards themselves, until it arrives
+        self._hidden.setOpacity(0.0)
+        self._holder.setGraphicsEffect(self._hidden)
+        self.setGeometry(self._window.rect())
+        self.raise_()
+        self.show()
+        run = self._run = QVariantAnimation(self)
+        run.setDuration(theme.STEADY)
+        run.setEasingCurve(QEasingCurve.OutCubic)
+        run.setStartValue(0.0)
+        run.setEndValue(1.0)
+        run.valueChanged.connect(self._step)
+        run.finished.connect(self.finish)
+        theme.animate(run)
+
+    def _step(self, value) -> None:
+        self._t = float(value)
+        self.update()
+
+    def finish(self) -> None:
+        """Straight to the end: the cards as they are now, nothing over them."""
+        run, self._run = self._run, None
+        if run is not None:
+            try:
+                run.finished.disconnect(self.finish)
+            except (RuntimeError, TypeError):
+                pass
+            theme.stop_animation(run)
+        if self._hidden is not None:
+            if self._holder.graphicsEffect() is self._hidden:
+                self._holder.setGraphicsEffect(None)
+            self._hidden = None
+        self._was, self._now = {}, {}
+        self._t = 1.0
+        self.hide()
+
+    @staticmethod
+    def _crop(p: QPainter, picture: QPixmap, shape: QRectF, size: QRectF) -> None:
+        """A picture at its own size, never squashed, cut to the shape it travels as."""
+        ratio = picture.devicePixelRatio()
+        width, height = min(shape.width(), size.width()), min(shape.height(), size.height())
+        p.drawPixmap(QRectF(shape.x(), shape.y(), width, height), picture, QRectF(0, 0, width * ratio, height * ratio))
+
+    def paintEvent(self, event):
+        if not self._was and not self._now:
+            return
+        p = QPainter(self)
+        viewport = self._area.viewport()
+        p.setClipRect(QRectF(viewport.mapTo(self._window, QPoint(0, 0)), viewport.size()))
+        t = self._t
+        for card in list(self._was) + [c for c in self._now if c not in self._was]:
+            was, before = self._was.get(card, (None, None))
+            now = self._where(card) if card.isVisible() and card in self._now else None   # live, as the window moves
+            frm, to = was or now, now or was
+            shape = QRectF(frm.x() + (to.x() - frm.x()) * t, frm.y() + (to.y() - frm.y()) * t,
+                           frm.width() + (to.width() - frm.width()) * t,
+                           frm.height() + (to.height() - frm.height()) * t)
+            if before is not None:
+                p.setOpacity(1.0 - t)
+                self._crop(p, before, shape, was)
+            if now is not None:
+                p.setOpacity(t)
+                self._crop(p, self._now[card], shape, now)
+        p.end()
 
 
 class _CardsArea(QScrollArea):
@@ -547,6 +660,9 @@ class LauncherWindow(QWidget):
         self.cards_area = _CardsArea(holder)
         self.cards_area.relaid.connect(self._fit)
         layout.addWidget(self.cards_area, 1)
+        self.morph = _Morph(self, holder, self.cards, self.cards_area)
+        for card in self.cards.values():
+            card.before_change = self.morph.capture
 
         self.foot = _label('', theme.TYPE['caption'], role='dim')
         self.foot.setTextFormat(Qt.RichText)
@@ -561,6 +677,7 @@ class LauncherWindow(QWidget):
         out (an app shown only once it is installed)."""
         if names == self._arranged:
             return
+        self.morph.capture()
         self._arranged = list(names)
         for card in self.cards.values():
             self.grid.removeWidget(card)
@@ -612,6 +729,8 @@ class LauncherWindow(QWidget):
             self.setMinimumSize(width, height)
 
     def _show_tier(self, tier: int, cards: list) -> None:
+        if tier != self._tier:
+            self.morph.capture()
         for card in self.cards.values():        # those out of sight too, ready for when they are shown
             card.set_tier(tier)
         if tier == self._tier:
@@ -626,6 +745,8 @@ class LauncherWindow(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._fit()
+        if self.morph.isVisible():
+            self.morph.setGeometry(self.rect())
 
     def showEvent(self, event):
         super().showEvent(event)
