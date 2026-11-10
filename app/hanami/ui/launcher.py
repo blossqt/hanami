@@ -6,10 +6,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QIcon, QPainter, QPen, QPixmap, QRegion
 from PySide6.QtWidgets import (QFileDialog, QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel,
-                               QMenu, QProgressBar,
+                               QMenu, QProgressBar, QStyle, QStyleOption, QStyleOptionFrame,
                                QPushButton, QScrollArea, QSizePolicy, QSpacerItem, QToolButton, QVBoxLayout,
                                QWidget)
 
@@ -448,10 +448,11 @@ class AppCard(QFrame):
 
 class _Morph(QWidget):
     """The cards' change as one movement rather than a jump. Just before the window shows less or
-    more of each card, rearranges them or a card's buttons change, each card is pictured as it is,
-    and again once the change is laid out. Each card then travels as one shape from where it was to
-    where it is, its old look fading into its new one on the way, and the cards themselves come back
-    once it has arrived. Drawn over the window, letting the mouse through."""
+    more of each card, rearranges them or a card's buttons change, what each card shows is pictured,
+    and again once the change is laid out. Each card then travels from where it was to where it is:
+    its own rounded background drawn by its own style at every size between, and what it showed
+    fading into what it shows inside it. The cards themselves come back once it has arrived. Drawn
+    over the window, letting the mouse through."""
 
     def __init__(self, window: QWidget, holder: QWidget, cards: dict, area: QScrollArea):
         super().__init__(window)
@@ -470,10 +471,36 @@ class _Morph(QWidget):
         if self._pending or not self._window.isVisible() or not theme.motion_on():
             return
         self.finish()
-        self._was = {card: (self._where(card), card.grab()) for card in self._cards.values() if card.isVisible()}
+        self._was = {card: (self._where(card), self._contents(card)) for card in self._cards.values()
+                     if card.isVisible()}
         if self._was:
             self._pending = True
             QTimer.singleShot(0, self._play)
+
+    def _contents(self, card: QWidget) -> QPixmap:
+        """What a card shows, without its background: drawn round its shape as that changes."""
+        ratio = card.devicePixelRatioF()
+        picture = QPixmap(card.size() * ratio)
+        picture.setDevicePixelRatio(ratio)
+        picture.fill(Qt.transparent)
+        p = QPainter(picture)
+        for part in card.findChildren(QWidget, options=Qt.FindDirectChildrenOnly):
+            if part.isVisible():
+                part.render(p, part.pos(), QRegion(), QWidget.RenderFlag.DrawChildren)
+        p.end()
+        return picture
+
+    @staticmethod
+    def _background(p: QPainter, card: QWidget, shape: QRect) -> None:
+        """The card's own background and edge, as its style sheet draws them, at this size."""
+        option = QStyleOption()
+        option.initFrom(card)
+        option.rect = shape
+        card.style().drawPrimitive(QStyle.PE_Widget, option, p, card)
+        frame = QStyleOptionFrame()
+        card.initStyleOption(frame)
+        frame.rect = shape
+        card.style().drawControl(QStyle.CE_ShapedFrame, frame, p, card)
 
     def _where(self, card: QWidget) -> QRectF:
         return QRectF(card.mapTo(self._window, QPoint(0, 0)), card.size())
@@ -483,7 +510,7 @@ class _Morph(QWidget):
         if not self._was or not self._window.isVisible():
             self._was = {}
             return
-        self._now = {card: card.grab() for card in self._cards.values() if card.isVisible()}
+        self._now = {card: self._contents(card) for card in self._cards.values() if card.isVisible()}
         self._hidden = QGraphicsOpacityEffect(self._holder)     # the cards themselves, until it arrives
         self._hidden.setOpacity(0.0)
         self._holder.setGraphicsEffect(self._hidden)
@@ -531,6 +558,7 @@ class _Morph(QWidget):
         if not self._was and not self._now:
             return
         p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
         viewport = self._area.viewport()
         p.setClipRect(QRectF(viewport.mapTo(self._window, QPoint(0, 0)), viewport.size()))
         t = self._t
@@ -538,15 +566,18 @@ class _Morph(QWidget):
             was, before = self._was.get(card, (None, None))
             now = self._where(card) if card.isVisible() and card in self._now else None   # live, as the window moves
             frm, to = was or now, now or was
-            shape = QRectF(frm.x() + (to.x() - frm.x()) * t, frm.y() + (to.y() - frm.y()) * t,
-                           frm.width() + (to.width() - frm.width()) * t,
-                           frm.height() + (to.height() - frm.height()) * t)
+            shape = QRect(round(frm.x() + (to.x() - frm.x()) * t), round(frm.y() + (to.y() - frm.y()) * t),
+                          round(frm.width() + (to.width() - frm.width()) * t),
+                          round(frm.height() + (to.height() - frm.height()) * t))
+            # a card coming or going fades as a whole; one that stays keeps its background whole
+            p.setOpacity(t if before is None else 1.0 - t if now is None else 1.0)
+            self._background(p, card, shape)
             if before is not None:
                 p.setOpacity(1.0 - t)
-                self._crop(p, before, shape, was)
+                self._crop(p, before, QRectF(shape), was)
             if now is not None:
                 p.setOpacity(t)
-                self._crop(p, self._now[card], shape, now)
+                self._crop(p, self._now[card], QRectF(shape), now)
         p.end()
 
 
