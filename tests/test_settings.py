@@ -505,6 +505,40 @@ class InstallProgressTests(_Controlled):
         self.controller.settings.set_installed('Grabbit', None)
 
 
+class BuiltHereUpdateTests(_Controlled):
+    """A copy built on this PC is updated in its own folder, through the same steps as an install,
+    and isn't then taken for one Hanami installed. Nothing is fetched or put anywhere."""
+
+    def test_updated_where_it_is(self):
+        import dataclasses
+        from unittest import mock
+        from hanami import releases
+        built = WORK / 'built' / 'Keytap' / 'Keytap.exe'
+        staged = WORK / 'built-here' / 'Keytap.new'
+        staged.mkdir(parents=True, exist_ok=True)
+        placed = []
+        asset = releases.Asset('Keytap-9.0.0-win64.zip', 1, '0' * 64, 'https://example.invalid/k.zip')
+        self.controller.latest['Keytap'] = releases.Release('Keytap', '9.0.0', '', '', asset)
+        entry = hanami.catalog.BY_NAME['Keytap']
+        with mock.patch.object(hanami.Settings, 'exe', lambda s, name: built if name == 'Keytap' else None), \
+                mock.patch.dict(hanami.catalog.BY_NAME, {'Keytap': dataclasses.replace(entry, dev_build=built)}), \
+                mock.patch.object(self.controller, '_holding', lambda name: False), \
+                mock.patch.object(self.controller, 'version_of', lambda name, exe: '1.0.0'), \
+                mock.patch.object(hanami.installer, 'prepare', lambda app, release, progress, cancel: staged), \
+                mock.patch.object(hanami.installer, 'finish',
+                                  lambda app, staged, previous, home=None: placed.append(home) or ['Keytap.exe']), \
+                mock.patch.object(self.suitetheme, 'game_in_front', lambda: False):
+            self.assertTrue(self.controller.update_available('Keytap'))
+            self.controller.install_app('Keytap')
+            self.assertEqual(self.controller.jobs['Keytap'].kind, 'update')
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and 'Keytap' in self.controller.jobs:
+                qt.processEvents()
+                time.sleep(0.01)
+        self.assertEqual(placed, [built.parent], 'put in the folder it runs from')
+        self.assertIsNone(self.controller.settings.installed('Keytap'), 'not recorded as installed by Hanami')
+
+
 class OnlyOnceInstalledTests(_Controlled):
     """Keyglow is never offered for installing - it needs a Drop ALT (the user, 2026-11-04): Hanami
     shows its card, and its ticks in Settings, only while it is on this PC."""
@@ -1471,6 +1505,69 @@ class WindowThreadTests(_Controlled):
         self.assertIn(named, hanami.win32.running_programs(), 'and still, looked at again')
         process.wait(5)
         self.assertNotIn(named, hanami.win32.running_programs(), 'gone once it has')
+
+
+class CopyBuiltHereTests(unittest.TestCase):
+    """A copy built on this PC, which Hanami didn't install, is still offered its updates."""
+
+    def controller(self, version, updates_itself=False):
+        from types import SimpleNamespace as Space
+        from pathlib import Path
+        from hanami import app as module, catalog
+        exe = Path(r'C:\built\Keytap\Keytap.exe')
+        fake = Space(latest={'Keytap': Space(version='2.0.0', asset=object())})
+        fake.settings = Space(exe=lambda name: exe, installed=lambda name: None)
+        fake.version_of = lambda name, path: version
+        fake.built_here = lambda name: module.Controller.built_here(fake, name)
+        entry = Space(dev_build=exe, updates_itself=updates_itself)
+        return module.Controller, fake, entry, catalog
+
+    def ask(self, version, updates_itself=False):
+        from unittest.mock import patch
+        controller, fake, entry, catalog = self.controller(version, updates_itself)
+        with patch.dict(catalog.BY_NAME, {'Keytap': entry}):
+            return controller.update_available(fake, 'Keytap'), controller.built_here(fake, 'Keytap')
+
+    def test_an_older_build_is_offered_the_release(self):
+        self.assertEqual(self.ask('1.0.0')[0], True)
+
+    def test_a_build_at_the_release_is_not(self):
+        self.assertEqual(self.ask('2.0.0')[0], False)
+
+    def test_a_build_whose_version_isnt_known_yet_is_not(self):
+        self.assertEqual(self.ask('')[0], False)
+
+    def test_an_app_with_its_own_updater_is_left_to_it(self):
+        offered, home = self.ask('1.0.0', updates_itself=True)
+        self.assertEqual((offered, home), (False, None))
+
+    def test_the_update_goes_in_the_folder_it_runs_from(self):
+        from pathlib import Path
+        self.assertEqual(self.ask('1.0.0')[1], Path(r'C:\built\Keytap'))
+
+
+class FootCheckTests(unittest.TestCase):
+    def setUp(self):
+        from hanami.ui.launcher import LauncherWindow
+        self.window = LauncherWindow()
+        self.addCleanup(self.window.close)
+
+    def test_the_window_has_a_way_to_check(self):
+        from unittest.mock import MagicMock
+        self.assertIn('href="check"', self.window.foot.text())
+        asked = MagicMock()
+        self.window.check_updates.connect(asked)
+        self.window.foot.linkActivated.emit('check')
+        asked.assert_called_once()
+
+    def test_it_says_when_checking_and_when_nothing_is_new(self):
+        self.window.show_checking(True, False)
+        self.assertIn('Checking', self.window.foot.text())
+        self.assertNotIn('href="check"', self.window.foot.text())
+        self.window.show_checking(False, True)
+        self.assertIn('up to date', self.window.foot.text())
+        self.window.show_checking(False, False)
+        self.assertIn('href="check"', self.window.foot.text())
 
 
 class CompactCardsTests(unittest.TestCase):

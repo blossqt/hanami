@@ -604,7 +604,7 @@ class SettingsWindow(QWidget):
         self._show_update_choice(chosen)
         row = QHBoxLayout()
         row.setSpacing(12)
-        self.check_button = QPushButton('Look now')
+        self.check_button = QPushButton('Check for updates')
         self.check_button.setCursor(Qt.PointingHandCursor)
         self.check_button.clicked.connect(self.check_now)
         row.addWidget(self.check_button)

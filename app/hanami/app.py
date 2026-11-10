@@ -320,6 +320,7 @@ class _Job:
         self.waited = 0.0
         self.staged: Path | None = None     # the new version, unpacked and checked, waiting to go in
         self.previous: list[str] = []       # what the old version had in its folder
+        self.home: Path | None = None       # a copy updated where it is: its folder
 
 
 class _Bridge(QObject):
@@ -985,12 +986,25 @@ class Controller(QObject):
         if self.window is not None:                             # its card alone
             self.window.cards[name].show_state(self.card_state(name))
 
+    def built_here(self, name: str) -> Path | None:
+        """The folder of this PC's own build of an app, which Hanami didn't install and updates
+        where it is - unless it has its own updater. Not a copy pointed to by hand."""
+        app = catalog.BY_NAME[name]
+        exe = self.settings.exe(name)
+        if exe is None or exe != app.dev_build or app.updates_itself or self.settings.installed(name):
+            return None
+        return exe.parent
+
     def update_available(self, name: str) -> bool:
-        """A newer release of an app Hanami installed (other copies update themselves, or by hand)."""
+        """A newer release of an app Hanami installed, or of a copy built on this PC."""
         release = self.latest.get(name)
+        if release is None or release.asset is None:
+            return False
         record = self.settings.installed(name)
-        return (release is not None and release.asset is not None and record is not None
-                and releases.is_newer(release.version, record.get('version')))
+        if record is not None:
+            return releases.is_newer(release.version, record.get('version'))
+        return (self.built_here(name) is not None
+                and releases.is_newer(release.version, self.version_of(name, self.settings.exe(name))))
 
     # ------------------------------------------------------------------ releases
 
@@ -1000,6 +1014,7 @@ class Controller(QObject):
             return
         self._checking = True
         self._show_checked()
+        self._update_window()
         apps = list(catalog.SUITE) + [catalog.HANAMI]
 
         def work():
@@ -1208,11 +1223,7 @@ class Controller(QObject):
             hours = minutes // 60
             when = ('just now' if minutes < 1 else f'{minutes} minute{"s" if minutes != 1 else ""} ago'
                     if minutes < 60 else f'{hours} hour{"s" if hours != 1 else ""} ago')
-            out = [f'{app.name} {self.latest[app.name].version}' for app in catalog.SUITE
-                   if self.update_available(app.name)]
-            mine = self.latest.get(catalog.HANAMI.name)
-            if mine and releases.is_newer(mine.version, __version__):
-                out.append(f'Hanami {mine.version}')
+            out = self._newer_names()
             found = ('Everything is up to date.' if not out else
                      f'{out[0]} is out.' if len(out) == 1 else f'{", ".join(out[:-1])} and {out[-1]} are out.')
             text = f'Looked {when}. {found}'
@@ -1248,8 +1259,10 @@ class Controller(QObject):
         """
         if name in self.jobs:
             return
-        kind = 'update' if self.settings.installed(name) else 'install'
+        home = self.built_here(name)
+        kind = 'update' if self.settings.installed(name) or home else 'install'
         job = self.jobs[name] = _Job(name, kind)
+        job.home = home
         self.problems.pop(name, None)
         self._download(job)
 
@@ -1275,7 +1288,9 @@ class Controller(QObject):
     def _holding(self, name: str) -> bool:
         """Is a program running from the app's install folder? Another copy, such as
         a build of it elsewhere, doesn't stand in an install's way."""
-        folder = os.path.normcase(str(catalog.install_dir(catalog.BY_NAME[name]))) + os.sep
+        job = self.jobs.get(name)
+        home = job.home if job is not None and job.home is not None else catalog.install_dir(catalog.BY_NAME[name])
+        folder = os.path.normcase(str(home)) + os.sep
         return any(path.startswith(folder) for path in win32.running_programs())
 
     def _when_quit(self, job: _Job, then) -> None:
@@ -1347,7 +1362,7 @@ class Controller(QObject):
 
         def work():
             try:
-                self._bridge.finished.emit(job.name, installer.finish(app, job.staged, job.previous))
+                self._bridge.finished.emit(job.name, installer.finish(app, job.staged, job.previous, home=job.home))
             except releases.ReleaseError as error:
                 self._bridge.finished.emit(job.name, str(error))
             except Exception as error:  # noqa: BLE001
@@ -1392,7 +1407,8 @@ class Controller(QObject):
             self.problems.pop(name, None)
         else:
             version = self.latest[name].version
-            self.settings.set_installed(name, version, result)
+            if job.home is None:
+                self.settings.set_installed(name, version, result)
             self.settings.set_told(name, version)
             self.problems.pop(name, None)
             self._say('Hanami', f'{name} {version} is installed.' if job.kind == 'install'
@@ -1524,6 +1540,7 @@ class Controller(QObject):
             self.window.uninstall_app.connect(self.uninstall_app)
             self.window.show_page.connect(self.show_page)
             self.window.update_hanami.connect(self.update_hanami)
+            self.window.check_updates.connect(self.check_releases)
             self.window.exe_chosen.connect(self._exe_chosen)
             self.window.output_clicked.connect(self.choose_output)
             self._update_window()
@@ -1616,9 +1633,22 @@ class Controller(QObject):
         for app in catalog.SUITE:
             self.window.cards[app.name].show_state(self.card_state(app.name))
         mine = self.latest.get(catalog.HANAMI.name)
+        self.window.show_checking(self._checking, self._just_found_nothing())
         self.window.show_hanami(mine.version if mine and releases.is_newer(mine.version, __version__) else '',
                                 self._self_update or '', self.hanami_update() is not None,
                                 waiting=self._staged_self is not None and not self._self_update_asked)
+
+    def _just_found_nothing(self) -> bool:
+        """Looked in the last minute, and nothing here is out of date."""
+        return bool(self._checked_wall) and time.time() - self._checked_wall < 60 and not self._newer_names()
+
+    def _newer_names(self) -> list[str]:
+        """What the last look found, as names and versions."""
+        out = [f'{app.name} {self.latest[app.name].version}' for app in catalog.SUITE if self.update_available(app.name)]
+        mine = self.latest.get(catalog.HANAMI.name)
+        if mine and releases.is_newer(mine.version, __version__):
+            out.append(f'Hanami {mine.version}')
+        return out
 
     def _show_hanami_update(self) -> None:
         """Settings > Updates' button to update Hanami now: with a newer Hanami to put in."""

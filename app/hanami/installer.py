@@ -167,9 +167,10 @@ def check(app: SuiteApp, staged: Path, version: str) -> None:
 
 # ------------------------------------------------------------------ placing
 
-def place(app: SuiteApp, staged: Path, previous: list[str]) -> list[str]:
-    """Swap the staged files in for the old version's. Returns what is now installed."""
-    target = catalog.install_dir(app)
+def place(app: SuiteApp, staged: Path, previous: list[str], home: Path | None = None) -> list[str]:
+    """Swap the staged files in for the old version's, in its install folder or in home.
+    Returns what is now installed."""
+    target = home or catalog.install_dir(app)
     new = sorted(p.name for p in staged.iterdir())
     if not target.exists():
         staged.rename(target)
@@ -228,16 +229,18 @@ def prepare(app: SuiteApp, release: Release, progress: Progress | None = None, c
 
 
 def finish(app: SuiteApp, staged: Path, previous: list[str] | None = None,
-           progress: Progress | None = None) -> list[str]:
-    """Step 4, once the old version has quit: swap the new one in. Returns what is installed."""
+           progress: Progress | None = None, home: Path | None = None) -> list[str]:
+    """Step 4, once the old version has quit: swap the new one in - where Hanami installs it, or
+    in home, the folder of a copy it updates where it is. Returns what is installed."""
     if progress:
         progress('place', 0, 0)
     try:
-        names = place(app, staged, previous or [])
+        names = place(app, staged, previous or [], home)
     except ReleaseError:
         shutil.rmtree(staged, ignore_errors=True)
         raise
-    add_shortcut(app)
+    if home is None:
+        add_shortcut(app)
     return names
 
 

@@ -478,6 +478,7 @@ class LauncherWindow(QWidget):
     uninstall_app = Signal(str)
     show_page = Signal(str)
     update_hanami = Signal()
+    check_updates = Signal()
     exe_chosen = Signal(str, str)
     settings_clicked = Signal()
     output_clicked = Signal(str)        # 'speakers' or 'headphones' 
@@ -495,6 +496,8 @@ class LauncherWindow(QWidget):
         self._tier = FULL
         self._fitting = False
         self._foot = ('', '', '')       # the footer whole, as plain words, and without the line about the tray
+        self._foot_args = ('', '', False, False)
+        self._checking = self._current = False
 
         top = self.top = QHBoxLayout()
         top.setSpacing(12)
@@ -548,8 +551,7 @@ class LauncherWindow(QWidget):
         self.foot = _label('', theme.TYPE['caption'], role='dim')
         self.foot.setTextFormat(Qt.RichText)
         self.foot.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)     # the window may be narrower than its words
-        self.foot.linkActivated.connect(lambda link: self.update_hanami.emit() if link == 'update'
-                                        else self.show_page.emit('Hanami'))
+        self.foot.linkActivated.connect(self._foot_link)
         layout.addWidget(self.foot)
         theme.restyle(self, self._style)
         self.show_hanami('')
@@ -633,9 +635,24 @@ class LauncherWindow(QWidget):
         self.settings.setIcon(suiteicons.icon('gear', theme.colors().text, 18))
         self.settings.setIconSize(QSize(18, 18))
 
+    def _foot_link(self, link: str) -> None:
+        if link == 'update':
+            self.update_hanami.emit()
+        elif link == 'check':
+            self.check_updates.emit()
+        else:
+            self.show_page.emit('Hanami')
+
+    def show_checking(self, checking: bool, current: bool) -> None:
+        """The footer's own word on looking for updates: under way, or nothing found just now."""
+        if (checking, current) != (self._checking, self._current):
+            self._checking, self._current = checking, current
+            self.show_hanami(*self._foot_args)
+
     def show_hanami(self, newer: str, updating: str = '', can_update: bool = False, waiting: bool = False) -> None:
         """The footer: Hanami's version, and a newer one if there is one - to update to here (or,
-        run from source, to see on GitHub) - or the one being put in."""
+        run from source, to see on GitHub) - or the one being put in, or else the way to look."""
+        self._foot_args = (newer, updating, can_update, waiting)
         name = f'Hanami {__version__}'
         link = f'style="color:{theme.ink()}; text-decoration:none"'
         plain = note = ''
@@ -650,6 +667,13 @@ class LauncherWindow(QWidget):
         elif newer:
             plain = f'Hanami {newer} is out - get it'
             note = f'<a href="hanami" {link}>{plain}</a>'
+        elif self._checking:
+            plain = note = 'Checking for updates…'
+        elif self._current:
+            plain = note = 'Everything is up to date'
+        else:
+            plain = 'Check for updates'
+            note = f'<a href="check" {link}>{plain}</a>'
         apart = '  ·  '
         self._foot = (name + apart + _TRAY_WORDS + (apart + note if note else ''),
                       name + apart + _TRAY_WORDS + (apart + plain if plain else ''),

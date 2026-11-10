@@ -32,6 +32,8 @@ class SuiteApp:
     # Not offered for installing: shown (its card, its ticks in Settings) only once it is on this PC.
     # For an app that is of use only to some - Keyglow needs a Drop ALT keyboard (the user, 2026-11-04).
     only_once_installed: bool = False
+    # Has an updater of its own, so Hanami leaves a copy it didn't install to that.
+    updates_itself: bool = False
 
     @property
     def manifest_app(self) -> str:
@@ -53,11 +55,12 @@ SUITE = (
     SuiteApp('Grabbit', 'Downloads videos, photo posts, torrents and files from links.', 'Grabbit.exe',
              _DOCUMENTS / 'Grabbit' / 'dist' / 'Grabbit' / 'Grabbit.exe',
              'blossqt/grabbit', '73c12e6787d3b5271ef6e3d3cca0a3e63c9c1aae998c5e390e94ef367b0e7c20',
-             startup_args=('--startup',)),
+             startup_args=('--startup',), updates_itself=True),
     SuiteApp('Homework Hub', 'Lists assignments due on Brightspace, Gradescope and Pearson MyLab.', 'HomeworkHub.exe',
              _DOCUMENTS / 'homework-hub' / 'dist' / 'HomeworkHub.exe',
              'blossqt/homework-hub-releases', 'd7cfd2d285134baa76c7a45512b9d04ccb63601364bbaff1f7898c3eba479b20',
-             release_name='HomeworkHub', single_exe=True, self_test=False, startup_args=('--no-window',)),
+             release_name='HomeworkHub', single_exe=True, self_test=False, startup_args=('--no-window',),
+             updates_itself=True),
     SuiteApp('Keyglow', 'Sets the Drop ALT keyboard’s key and base lighting.', 'Keyglow.exe',
              _DOCUMENTS / 'Keyglow' / 'dist' / 'Keyglow' / 'Keyglow.exe',
              'blossqt/keyglow', '90b65151eb455d45d0738241118b34d72d3867e3f22d998cf03458afdd1c3f28',

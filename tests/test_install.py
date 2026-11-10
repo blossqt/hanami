@@ -160,6 +160,22 @@ class InstallTest(unittest.TestCase):
         self.assertTrue((exe.parent / 'my notes.txt').exists(), 'the user\'s file stays')
         self.assertFalse((WORK / 'Start Menu' / 'Note.lnk').exists())
 
+    def test_a_copy_built_here_is_updated_in_its_own_folder(self):
+        built = WORK / 'built' / 'Note'
+        built.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, WORK / 'built', ignore_errors=True)
+        (built / 'Note.exe').write_bytes(b'MZ old')
+        (built / 'mine.txt').write_text('mine')
+        publish('test/note', 'Note', '1.3.0', 'Note.exe', b'MZ new')
+        catalog.programs().mkdir(parents=True, exist_ok=True)
+        staged = installer.prepare(NOTE, releases.latest(NOTE))
+        installer.finish(NOTE, staged, [], home=built)
+        self.assertEqual((built / 'Note.exe').read_bytes(), b'MZ new')
+        self.assertEqual((built / 'mine.txt').read_text(), 'mine')
+        self.assertFalse(catalog.install_dir(NOTE).exists(), 'nothing where Hanami installs')
+        self.assertFalse((WORK / 'Start Menu' / 'Note.lnk').exists(), 'no second shortcut')
+        self.assertEqual(list((WORK / 'Programs').iterdir()), [], 'nothing left over')
+
     def test_a_download_that_is_not_the_release_is_not_installed(self):
         publish('test/note', 'Note', '1.0.0', 'Note.exe', b'MZ one', claim={'sha256': '0' * 64})
         with self.assertRaisesRegex(releases.ReleaseError, 'didn’t match'):
