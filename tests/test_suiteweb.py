@@ -62,6 +62,15 @@ SITES = [
     ('https://i.ebayimg.com/images/g/AbCdEf/s-l300.jpg', 'https://i.ebayimg.com/images/g/AbCdEf/s-l1600.jpg'),
     ('https://i.etsystatic.com/12345/r/il/abcdef/1234567890/il_340x270.1234567890_ab12.jpg',
      'https://i.etsystatic.com/12345/r/il/abcdef/1234567890/il_fullxfull.1234567890_ab12.jpg'),
+    # Free collections (real addresses, 2026-11-13).
+    ('https://images-assets.nasa.gov/image/PIA14417/PIA14417~medium.jpg',
+     'https://images-assets.nasa.gov/image/PIA14417/PIA14417~orig.jpg'),
+    ('https://images.metmuseum.org/CRDImages/ep/web-large/DP-42549-001.jpg',
+     'https://images.metmuseum.org/CRDImages/ep/original/DP-42549-001.jpg'),
+    ('https://www.artic.edu/iiif/2/2d484387-2509-5e8e-2c43-22f9981972eb/full/843,/0/default.jpg',
+     'https://www.artic.edu/iiif/2/2d484387-2509-5e8e-2c43-22f9981972eb/full/max/0/default.jpg'),
+    ('https://tile.loc.gov/image-services/iiif/2/service:pnp:ppmsca:12345/full/pct:25/0/default.jpg',
+     'https://tile.loc.gov/image-services/iiif/2/service:pnp:ppmsca:12345/full/max/0/default.jpg'),
 ]
 
 
@@ -111,9 +120,86 @@ class RuleTests(unittest.TestCase):
 
     def test_robot_checks(self):
         self.assertTrue(suiteweb.robot_check(403, {'cf-mitigated': 'challenge', 'server': 'cloudflare'}))
+        # Anubis: its redirect, and its puzzle page (Unsplash's photo pages, 2026-11-13).
+        self.assertTrue(suiteweb.robot_check(307, {'location': '/.within.website?redir=%2Fphotos%2Fa'}))
+        self.assertTrue(suiteweb.robot_check(401, {'set-cookie': 'techaro.lol-anubis-cookie-verification=01; Path=/'}))
+        self.assertFalse(suiteweb.robot_check(401, {'set-cookie': 'session=1; Path=/'}))
         self.assertTrue(suiteweb.robot_check(503, {'server': 'cloudflare'}))
         self.assertFalse(suiteweb.robot_check(200, {'server': 'cloudflare'}))
         self.assertFalse(suiteweb.robot_check(403, {'server': 'nginx'}))
+
+
+class PaidTests(unittest.TestCase):
+    def test_paid_sites_and_pictures(self):
+        paid = {'https://plus.unsplash.com/premium_photo-1661954372617-15780178eb2e?w=600': 'Unsplash+',
+                'https://www.shutterstock.com/image-photo/cherry-blossoms-spring-2155566': 'Shutterstock',
+                'https://image.shutterstock.com/image-photo/a-260nw-1.jpg': 'Shutterstock',
+                'https://www.gettyimages.co.uk/detail/photo/cherry-blossom-royalty-free-image/123': 'Getty Images',
+                'https://media.gettyimages.com/id/123/photo/a.jpg?s=612x612': 'Getty Images',
+                'https://www.istockphoto.com/photo/cherry-blossom-gm123456-789': 'iStock',
+                'https://stock.adobe.com/images/cherry-blossom/12345': 'Adobe Stock',
+                'https://t4.ftcdn.net/jpg/01/23/45/67/360_F_1.jpg': 'Adobe Stock',
+                'https://www.freepik.com/premium-photo/cherry-blossom-tree_123.htm': 'Freepik Premium',
+                'https://img.freepik.com/premium-photo/rose_123-456.jpg?w=740': 'Freepik Premium'}
+        for url, name in paid.items():
+            with self.subTest(url):
+                self.assertEqual(suiteweb.paid(url), name)
+        for url in ('https://images.unsplash.com/photo-1555231955-348aa2312e19?w=640',
+                    'https://img.freepik.com/free-photo/rose_123-456.jpg?w=740',
+                    'https://unsplash.com/photos/a-solitary-spire-VKdU_oP54uo', 'https://example.com/shutterstock.jpg'):
+            with self.subTest(url):
+                self.assertEqual(suiteweb.paid(url), '')
+
+    def test_words_from_an_address(self):
+        cases = {
+            'https://unsplash.com/photos/a-person-standing-on-top-of-a-large-rock-nEkqdbCjbg0':
+                'person standing large rock',
+            'https://www.shutterstock.com/image-photo/cherry-blossoms-spring-2155566': 'cherry blossoms spring',
+            'https://www.istockphoto.com/photo/cherry-blossom-gm123456-789': 'cherry blossom',
+            'https://www.gettyimages.com/detail/photo/cherry-blossom-royalty-free-image/123': 'cherry blossom',
+            'https://www.freepik.com/premium-photo/cherry-blossom-tree_123.htm': 'cherry blossom tree',
+            'https://plus.unsplash.com/premium_photo-1661954372617-15780178eb2e?w=600': '',
+            'https://example.com/p/1234': ''}
+        for url, said in cases.items():
+            with self.subTest(url):
+                self.assertEqual(suiteweb.words(url), said)
+
+    def test_free_matches_commons_first_and_openverse_if_back_in_time(self):
+        commons = {'query': {'pages': {
+            '2': {'index': 2, 'title': 'File:Second rock.jpg', 'imageinfo': [{
+                'url': 'https://upload.wikimedia.org/b.jpg?utm_source=x', 'thumburl': 'https://upload.wikimedia.org/t/b.jpg',
+                'width': 800, 'height': 600, 'descriptionurl': 'https://commons.wikimedia.org/wiki/File:B.jpg',
+                'extmetadata': {'LicenseShortName': {'value': 'CC0'}, 'Artist': {'value': '<a href="x">Ann</a>'}}}]},
+            '1': {'index': 1, 'title': 'File:First_rock.jpg', 'imageinfo': [{
+                'url': 'https://upload.wikimedia.org/a.jpg', 'width': 10, 'height': 10,
+                'extmetadata': {'LicenseShortName': {'value': 'CC BY-SA 4.0'}}}]},
+            '3': {'index': 3, 'title': 'File:Scan.tif', 'imageinfo': [{'url': 'https://upload.wikimedia.org/c.tif'}]}}}}
+        openverse = {'results': [{'title': 'Spire', 'url': 'https://live.staticflickr.com/1/2_3_b.jpg',
+                                  'thumbnail': 'https://api.openverse.org/v1/images/x/thumb/', 'license': 'by',
+                                  'license_version': '2.0', 'creator': 'Bo', 'width': 1024, 'height': 683}]}
+
+        def answer(address, timeout):
+            return commons if 'wikimedia' in address else openverse
+
+        with mock.patch.object(suiteweb, '_json', side_effect=answer):
+            found = suiteweb.free_matches('rock')
+        self.assertEqual([m['title'] for m in found], ['First rock', 'Second rock', 'Spire'])
+        self.assertEqual(found[1]['url'], 'https://upload.wikimedia.org/b.jpg')
+        self.assertEqual((found[1]['licence'], found[1]['creator']), ('CC0', 'Ann'))
+        self.assertEqual(found[2]['licence'], 'CC BY 2.0')
+
+        def slow(address, timeout):
+            if 'openverse' in address:
+                import time
+                time.sleep(1.0)
+            return answer(address, timeout)
+
+        with mock.patch.object(suiteweb, '_json', side_effect=slow), mock.patch.object(suiteweb, 'OPENVERSE_WAIT', 0.2):
+            self.assertEqual(len(suiteweb.free_matches('rock')), 2)          # Commons' only, not held up
+
+        with mock.patch.object(suiteweb, '_json', side_effect=OSError('offline')):
+            self.assertEqual(suiteweb.free_matches('rock'), [])
+        self.assertEqual(suiteweb.free_matches('  '), [])
 
 
 PICTURES = {'/small.jpg': 2_000, '/full.jpg': 90_000, '/banner_1200x1200.jpg': 5_000, '/banner.jpg': 3_000,
