@@ -746,6 +746,32 @@ class SelfUpdateTests(_Controlled):
         finally:
             window.close()
 
+    def test_the_cards_fill_the_window(self):
+        """However much of each card shows, the rows share the height: no band of empty glass under
+        the cards (the user's window, cards on one line, was half empty)."""
+        from hanami.ui.launcher import LINE, LauncherWindow
+        launcher = LauncherWindow()
+        try:
+            launcher.show()
+            for size in ((760, 440), (900, 1000)):
+                launcher.resize(*size)
+                launcher._fit()
+                qt.processEvents()
+                area = launcher.cards_area.viewport()
+                shown = [c for c in launcher.cards.values() if c.isVisible()]
+                bottom = max(c.mapTo(area, c.rect().bottomLeft()).y() for c in shown)
+                self.assertGreaterEqual(bottom, area.height() - 4, f'{size}: cards reach the foot')
+            launcher.resize(760, 440)
+            launcher._fit()
+            qt.processEvents()
+            if launcher._tier >= LINE:
+                card = shown[0]
+                gap_above = card.name.mapTo(card, card.name.rect().topLeft()).y()
+                gap_below = card.height() - card.name.mapTo(card, card.name.rect().bottomLeft()).y()
+                self.assertLess(abs(gap_above - gap_below), 12, 'one line, in the middle of a taller card')
+        finally:
+            launcher.close()
+
     def test_windows_resize_freely(self):
         """No least height for each width at a window's top: Qt trims resizing drags to one (the
         user's corner drags moved one side only). And a card's update() is still its own."""

@@ -150,6 +150,7 @@ class AppCard(QFrame):
         # padding all round. The buttons sit at the foot, so a row of cards has them on one line.
         text = self.column = QVBoxLayout()
         text.setSpacing(0)
+        text.addStretch(0)                          # over the name: a share of spare height only on one line (set_tier)
         heading = self.heading = QHBoxLayout()
         heading.setSpacing(8)
         name = self.name = _serif(app.name, 13)
@@ -199,6 +200,7 @@ class AppCard(QFrame):
         self.progress.hide()
         status.addWidget(self.progress)
         text.addWidget(self.status)
+        self.status.hide()                          # until show_state has something for it to say
         text.addStretch(1)                          # spare height above the buttons, never under
         buttons = self.actions = QHBoxLayout()
         buttons.setSpacing(8)
@@ -307,6 +309,10 @@ class AppCard(QFrame):
             self.more.setFixedSize(28, row)
             size = button_h if slim else _ICON
             self.icon.setFixedSize(size, size)
+            # A card taller than its one line (the rows share the window's height): the line in the
+            # middle, the icon with it. Roomy, the name stays at the top and the buttons at the foot.
+            self.column.setStretch(0, 1 if slim else 0)
+            self.row.setAlignment(self.icon, Qt.AlignVCenter if slim else Qt.AlignTop)
             self._exe = None                # drawn afresh at its new size
         self.about.setVisible(tier == FULL)
         self.version.setVisible(tier != ICONS)
@@ -686,8 +692,8 @@ class LauncherWindow(QWidget):
             grid.setColumnStretch(column, 1)
         self.grid = grid
         self._arranged = [app.name for app in SUITE]
-        stack.addLayout(grid)
-        stack.addStretch(1)
+        stack.addLayout(grid)          # no stretch under it: the rows share the height (_share_rows)
+        self._share_rows()
         self.cards_area = _CardsArea(holder)
         self.cards_area.relaid.connect(self._fit)
         layout.addWidget(self.cards_area, 1)
@@ -716,7 +722,15 @@ class LauncherWindow(QWidget):
             self.grid.addWidget(self.cards[name], index // 2, index % 2)
         for name, card in self.cards.items():
             card.setVisible(name in names)
+        self._share_rows()
         self._fit()
+
+    def _share_rows(self) -> None:
+        """Every row of cards an even share of the height, so the cards fill the window rather
+        than leaving a band of empty glass under them (the user: "this looks weird")."""
+        rows = (len(self._arranged) + 1) // 2
+        for row in range(max(rows, self.grid.rowCount())):
+            self.grid.setRowStretch(row, 1 if row < rows else 0)
 
     # ---------------------------------------------------------------- showing less as it shrinks
     def _rows(self) -> list[list[AppCard]]:
