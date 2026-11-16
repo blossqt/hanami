@@ -65,6 +65,11 @@ SUITE = (
              _DOCUMENTS / 'Keyglow' / 'dist' / 'Keyglow' / 'Keyglow.exe',
              'blossqt/keyglow', '90b65151eb455d45d0738241118b34d72d3867e3f22d998cf03458afdd1c3f28',
              only_once_installed=True),
+    # Shown once on this PC, never offered (the user, 2026-11-15). Built in its Craft Anything project.
+    SuiteApp('Dockline', 'A dock with live widgets in place of the Windows taskbar.', 'Dockline.exe',
+             _DOCUMENTS / 'Craft Anything' / 'lumabar-xyz' / 'app' / 'dist' / 'Dockline' / 'Dockline.exe',
+             'blossqt/dockline', '6f51fe14537a262dc627e5ab1e32979aa1bc55313e16699f441a66ab492339a1',
+             only_once_installed=True),
 )
 
 # Hanami itself: checked for newer releases, which its window then points to.

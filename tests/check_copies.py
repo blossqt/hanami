@@ -34,12 +34,17 @@ QT_APPS = [DOCUMENTS / 'Keytap' / 'app' / 'keytap', DOCUMENTS / 'Dropshift' / 'a
            DOCUMENTS / 'Grabbit' / 'app' / 'grabbit']
 # Keyglow: a window only, with no tray icon of its own - its menu shows in Hanami's while it is open.
 KEYGLOW = DOCUMENTS / 'Keyglow' / 'app' / 'keyglow'
-RELEASED_BY_THE_KIT = [DOCUMENTS / 'Keytap' / 'build', DOCUMENTS / 'Dropshift' / 'build', DOCUMENTS / 'Keyglow' / 'build']
+# Dockline: built in its Craft Anything project; no tray icon of its own either (its menu shows in
+# Hanami's while it runs), and its suitetheme.py sits in the package itself, not in ui\.
+DOCKLINE_ROOT = DOCUMENTS / 'Craft Anything' / 'lumabar-xyz' / 'app'
+DOCKLINE = DOCKLINE_ROOT / 'app' / 'dockline'
+RELEASED_BY_THE_KIT = [DOCUMENTS / 'Keytap' / 'build', DOCUMENTS / 'Dropshift' / 'build', DOCUMENTS / 'Keyglow' / 'build',
+                       DOCKLINE_ROOT / 'build']
 
 COPIES = {
-    ROOT / 'app' / 'hanami' / 'suitelink.py': QT_APPS + [KEYGLOW, DOCUMENTS / 'homework-hub'],
+    ROOT / 'app' / 'hanami' / 'suitelink.py': QT_APPS + [KEYGLOW, DOCKLINE, DOCUMENTS / 'homework-hub'],
     ROOT / 'app' / 'hanami' / 'suitetray.py': QT_APPS,
-    ROOT / 'app' / 'hanami' / 'ui' / 'suitetheme.py': [app / 'ui' for app in QT_APPS + [KEYGLOW]],
+    ROOT / 'app' / 'hanami' / 'ui' / 'suitetheme.py': [app / 'ui' for app in QT_APPS + [KEYGLOW]] + [DOCKLINE],
     ROOT / 'app' / 'hanami' / 'ui' / 'suitesettings.py': [app / 'ui' for app in QT_APPS + [KEYGLOW]],
     ROOT / 'app' / 'hanami' / 'ui' / 'suiteicons.py': [app / 'ui' for app in QT_APPS + [KEYGLOW]],
     ROOT / 'app' / 'hanami' / 'ui' / 'GeistSerif-Regular.ttf': [app / 'ui' for app in QT_APPS + [KEYGLOW]],
