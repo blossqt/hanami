@@ -1720,5 +1720,59 @@ class CompactCardsTests(unittest.TestCase):
 
 
 
+class FullScreenTests(unittest.TestCase):
+    """win32.fullscreen_in_front: a game or a full-screen video, never a maximised window (which also
+    fills the screen while the Windows taskbar is hidden; the edge panel stayed shut over a browser)."""
+
+    def check(self, zoomed: bool, style: int) -> bool:
+        from ctypes import wintypes
+        win32 = hanami.win32
+
+        class Stub:
+            @staticmethod
+            def GetForegroundWindow():
+                return 1
+
+            @staticmethod
+            def GetClassNameW(hwnd, buffer, size):
+                buffer.value = 'Chrome_WidgetWin_1'
+                return 1
+
+            @staticmethod
+            def IsZoomed(hwnd):
+                return int(zoomed)
+
+            @staticmethod
+            def GetWindowLongPtrW(hwnd, index):
+                return style
+
+            @staticmethod
+            def MonitorFromWindow(hwnd, flags):
+                return 1
+
+            @staticmethod
+            def GetWindowRect(hwnd, rect):
+                rect._obj.left, rect._obj.top, rect._obj.right, rect._obj.bottom = 0, 0, 1920, 1080
+                return 1
+
+            @staticmethod
+            def GetMonitorInfoW(monitor, info):
+                info._obj.rcMonitor = wintypes.RECT(0, 0, 1920, 1080)
+                return 1
+
+        from unittest import mock
+        with mock.patch.object(win32, "user32", Stub):
+            return win32.fullscreen_in_front()
+
+    def test_game_or_video_is_full_screen(self):
+        self.assertTrue(self.check(False, 0x80000000))             # WS_POPUP, no title bar
+
+    def test_maximised_window_is_not(self):
+        self.assertFalse(self.check(True, 0x16CF0000))
+
+    def test_window_with_a_title_bar_is_not(self):
+        self.assertFalse(self.check(False, 0x14CF0000))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

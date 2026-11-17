@@ -129,15 +129,24 @@ user32.GetAsyncKeyState.argtypes, user32.GetAsyncKeyState.restype = [ctypes.c_in
 _DESKTOP_CLASSES = {'Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd'}
 
 
+user32.IsZoomed.argtypes = [wintypes.HWND]
+user32.GetWindowLongPtrW.argtypes, user32.GetWindowLongPtrW.restype = [wintypes.HWND, ctypes.c_int], ctypes.c_ssize_t
+_WS_CAPTION = 0x00C00000
+
+
 def fullscreen_in_front() -> bool:
     """Whether the window in front fills its screen - a game, a video, a presentation (the desktop
-    itself, which fills it too, doesn't count)."""
+    itself, which fills it too, doesn't count). A maximised window, or one with a title bar, is not
+    full screen: with the Windows taskbar hidden (Dockline) or set to hide by itself, a maximised
+    browser fills the whole screen too, and the edge panel stayed shut over it (2026-11-16)."""
     hwnd = user32.GetForegroundWindow()
     if not hwnd:
         return False
     name = ctypes.create_unicode_buffer(64)
     user32.GetClassNameW(hwnd, name, len(name))
     if name.value in _DESKTOP_CLASSES:
+        return False
+    if user32.IsZoomed(hwnd) or user32.GetWindowLongPtrW(hwnd, -16) & _WS_CAPTION == _WS_CAPTION:   # GWL_STYLE
         return False
     rect, info = wintypes.RECT(), _MonitorInfo()
     info.cbSize = ctypes.sizeof(info)
