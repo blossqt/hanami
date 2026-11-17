@@ -1777,6 +1777,40 @@ class CompactCardsTests(unittest.TestCase):
 
 
 
+class LocateStartTests(unittest.TestCase):
+    """"Find it on this PC" opens where the app most likely is, not always Documents."""
+
+    def test_it_opens_at_the_app_itself_or_the_nearest_folder(self):
+        import dataclasses
+
+        from hanami import catalog
+        from hanami.ui import launcher
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            built = root / 'src' / 'Thing' / 'dist' / 'Thing' / 'Thing.exe'
+            app = dataclasses.replace(catalog.SUITE[0], name='Thing', exe_name='Thing.exe', dev_build=built)
+            os.environ['HANAMI_PROGRAMS'] = str(root / 'Programs')
+            launcher.BY_NAME['Thing'] = app
+            try:
+                # Neither there: the nearest folder of the source build that exists.
+                (root / 'src' / 'Thing').mkdir(parents=True)
+                self.assertEqual(launcher.locate_start('Thing'), root / 'src' / 'Thing')
+                # Built here: the program itself, selected.
+                built.parent.mkdir(parents=True)
+                built.write_bytes(b'')
+                self.assertEqual(launcher.locate_start('Thing'), built)
+                # Installed by Hanami: that copy comes first.
+                installed = root / 'Programs' / 'Thing' / 'Thing.exe'
+                installed.parent.mkdir(parents=True)
+                installed.write_bytes(b'')
+                self.assertEqual(launcher.locate_start('Thing'), installed)
+                # An app it does not know: Documents.
+                self.assertEqual(launcher.locate_start('Nothing'), Path.home() / 'Documents')
+            finally:
+                del launcher.BY_NAME['Thing']
+                os.environ.pop('HANAMI_PROGRAMS', None)
+
+
 class FullScreenTests(unittest.TestCase):
     """win32.fullscreen_in_front: a game or a full-screen video, never a maximised window (which also
     fills the screen while the Windows taskbar is hidden; the edge panel stayed shut over a browser)."""

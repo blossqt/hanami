@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QFileDialog, QFrame, QGraphicsOpacityEffect, QGri
                                QWidget)
 
 from .. import __version__, win32
-from ..catalog import SUITE
+from ..catalog import BY_NAME, SUITE, installed_exe
 from . import icons, suiteicons, theme
 from .sound import SoundToggle
 
@@ -637,6 +637,24 @@ class _CardsArea(QScrollArea):
         return False
 
 
+def locate_start(name: str) -> Path:
+    """Where "Find it on this PC" opens: the app's program itself (selected) where Hanami installs it or where it is
+    built from source on this PC, else the nearest folder of either that exists, else Documents."""
+    app = BY_NAME.get(name)
+    if app is None:
+        return Path.home() / 'Documents'
+    for exe in (installed_exe(app), app.dev_build):
+        if exe.is_file():
+            return exe
+    for exe in (app.dev_build, installed_exe(app)):
+        folder = exe.parent
+        while folder != folder.parent and folder != Path.home():
+            if folder.is_dir():
+                return folder
+            folder = folder.parent
+    return Path.home() / 'Documents'
+
+
 class LauncherWindow(QWidget):
     open_app = Signal(str)
     quit_app = Signal(str)
@@ -884,7 +902,6 @@ class LauncherWindow(QWidget):
         """
 
     def _locate(self, name: str) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, f'Where is {name}?', str(Path.home() / 'Documents'),
-                                              'Programs (*.exe)')
+        path, _ = QFileDialog.getOpenFileName(self, f'Where is {name}?', str(locate_start(name)), 'Programs (*.exe)')
         if path:
             self.exe_chosen.emit(name, path)
