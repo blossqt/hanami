@@ -326,6 +326,7 @@ class _Job:
 class _Bridge(QObject):
     """Carries results from worker threads back to Qt's."""
     checked = Signal(object)                  # {name: Release or error text}
+    app_checked = Signal(str, object)         # one app's check (its card's menu): name, Release or error text
     progress = Signal(str, str, int, int)     # name, phase, done, total
     prepared = Signal(str, object)            # name, the staged folder of a checked new version
     finished = Signal(str, object)            # name, files installed (list) or an error (str)
@@ -417,6 +418,8 @@ class Controller(QObject):
         self._versions: dict[tuple, str] = {}
         self._bridge = _Bridge(self)
         self._bridge.checked.connect(self._releases_checked)
+        self._bridge.app_checked.connect(self._app_checked)
+        self._checking_apps: set[str] = set()
         self._bridge.progress.connect(self._job_progress)
         self._bridge.prepared.connect(self._job_prepared)
         self._bridge.finished.connect(self._job_finished)
@@ -1030,6 +1033,47 @@ class Controller(QObject):
 
         threading.Thread(target=work, name='hanami-check', daemon=True).start()
 
+    def check_app(self, name: str) -> None:
+        """Ask GitHub for one app's newest release now (its card's Check for updates); the outcome
+        shows on its card for a while, and an update found shows its Update button."""
+        if name not in catalog.BY_NAME or name in self._checking_apps or name in self.jobs:
+            return
+        self._checking_apps.add(name)
+        self._card_note(name, 'Checking for updates…')
+        app = catalog.BY_NAME[name]
+
+        def work():
+            try:
+                result = releases.latest(app)
+            except releases.ReleaseError as error:
+                result = str(error)
+            except Exception as error:  # noqa: BLE001 - a bug here must not take Hanami down
+                result = f'The check failed: {error}'
+            self._bridge.app_checked.emit(name, result)
+
+        threading.Thread(target=work, name=f'hanami-check-{name}', daemon=True).start()
+
+    def _app_checked(self, name: str, result) -> None:
+        self._checking_apps.discard(name)
+        if isinstance(result, releases.Release):
+            self.latest[name] = result
+            self.problems.pop(name, None)
+            if self.update_available(name):
+                note = f'Version {result.version} available.'
+            elif self.settings.exe(name) is None:
+                note = f'Latest version: {result.version}.'
+            else:
+                note = 'Up to date.'
+        else:
+            note = str(result) or 'The update check failed.'
+        self._update_window()
+        self._card_note(name, note, 6000)
+
+    def _card_note(self, name: str, note: str, ms: int = 0) -> None:
+        card = self.window.cards.get(name) if self.window is not None else None
+        if card is not None:
+            card.show_note(note, ms)
+
     def _releases_checked(self, results: dict) -> None:
         self._checking = False
         self._checked_at = time.monotonic()
@@ -1541,6 +1585,7 @@ class Controller(QObject):
             self.window.show_page.connect(self.show_page)
             self.window.update_hanami.connect(self.update_hanami)
             self.window.check_updates.connect(self.check_releases)
+            self.window.check_app.connect(self.check_app)
             self.window.exe_chosen.connect(self._exe_chosen)
             self.window.output_clicked.connect(self.choose_output)
             self._update_window()

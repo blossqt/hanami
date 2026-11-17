@@ -127,10 +127,15 @@ class AppCard(QFrame):
     uninstall_clicked = Signal(str)
     locate_clicked = Signal(str)
     page_clicked = Signal(str)
+    check_clicked = Signal(str)
 
     def __init__(self, app):
         super().__init__()
         self.app = app
+        self._note = ''                 # a check's outcome, shown on the status line for a while
+        self._note_timer = QTimer(self)
+        self._note_timer.setSingleShot(True)
+        self._note_timer.timeout.connect(lambda: self.show_note(''))
         self.setObjectName('card')
         self._tier = FULL
         self._button_h = 30
@@ -378,15 +383,24 @@ class AppCard(QFrame):
         except RuntimeError:                        # the card is gone
             pass
 
+    def show_note(self, note: str, ms: int = 0) -> None:
+        """A line under the name for a while (ms; 0 keeps it until the next): a check's outcome."""
+        self._note = note
+        self._note_timer.stop()
+        if note and ms:
+            self._note_timer.start(ms)
+        if self._state is not None:
+            self.show_state(self._state)
+
     def show_state(self, s: CardState) -> None:
         """The card as the app is now - unchanged, nothing is done (it is asked every 2 s, and
         through an install)."""
-        shown = (s, theme.colors().dim.name(), theme.ink())
+        shown = (s, theme.colors().dim.name(), theme.ink(), self._note)
         if shown == self._shown:
             return
         busy = bool(s.busy)
         shape = (s.exe is None, s.running, s.starting, s.update and not busy, s.in_tray and not busy, busy,
-                 bool(s.problem), bool(s.version))     # not an install's progress, which moves all along
+                 bool(s.problem), bool(s.version), bool(self._note))     # not an install's progress, which moves all along
         if self._shape is not None and shape != self._shape and self.before_change is not None:
             self.before_change()
         self._shape = shape
@@ -407,6 +421,8 @@ class AppCard(QFrame):
             line = ''                               # 2026-11-02); not installed or a new version: the buttons
         if s.problem and not s.busy:
             line += f'<span style="color:{c.error.name()}">{s.problem}</span>'
+        elif self._note and not s.busy:
+            line += f'<span style="color:{dim}">{self._note}</span>'
         self.state.setText(line)
         self.state.setVisible(bool(line))
         self.dot.set(None if s.exe is None else 'running' if s.running else 'stopped',
@@ -445,6 +461,7 @@ class AppCard(QFrame):
         if not rebuild_menu:
             return
         self.menu.clear()
+        self.menu.addAction('Check for updates', lambda: self.check_clicked.emit(self.app.name))
         self.menu.addAction('Release notes', lambda: self.page_clicked.emit(self.app.name))
         self.menu.addAction('Find it on this PC…', lambda: self.locate_clicked.emit(self.app.name))
         if s.installed:
@@ -627,6 +644,7 @@ class LauncherWindow(QWidget):
     cancel_install = Signal(str)
     uninstall_app = Signal(str)
     show_page = Signal(str)
+    check_app = Signal(str)
     update_hanami = Signal()
     check_updates = Signal()
     exe_chosen = Signal(str, str)
@@ -685,6 +703,7 @@ class LauncherWindow(QWidget):
             card.uninstall_clicked.connect(self.uninstall_app)
             card.page_clicked.connect(self.show_page)
             card.locate_clicked.connect(self._locate)
+            card.check_clicked.connect(self.check_app)
             theme.light_up(card, 18)
             self.cards[app.name] = card
             grid.addWidget(card, index // 2, index % 2)

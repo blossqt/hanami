@@ -574,6 +574,63 @@ class OnlyOnceInstalledTests(_Controlled):
         self.controller.window.close()
 
 
+class CheckOneAppTests(_Controlled):
+    """Check for updates in an app's card menu asks for that app alone, and its card says what came
+    of it. Nothing is fetched: releases.latest stands in."""
+
+    def check(self, name, found, exe):
+        from unittest import mock
+        from hanami import releases
+        from hanami.ui.launcher import LauncherWindow
+        asked = []
+
+        def latest(app, timeout=15):
+            asked.append(app.name)
+            if isinstance(found, str):
+                raise releases.ReleaseError(found)
+            return found
+
+        self.controller.window = LauncherWindow()
+        self.controller.window.check_app.connect(self.controller.check_app)     # as show_window connects it
+        card = self.controller.window.cards[name]
+        actions = [a.text() for a in card.menu.actions()]
+        try:
+            with mock.patch.object(releases, 'latest', latest),                     mock.patch.object(hanami.Settings, 'exe', lambda s, n: exe if n == name else None),                     mock.patch.object(hanami.Settings, 'installed',
+                                      lambda s, n: {'version': '1.0.0'} if n == name and exe else None):
+                self.controller._update_window()
+                actions = [a.text() for a in card.menu.actions()]
+                card.check_clicked.emit(name)
+                self.assertIn('Checking for updates', card.state.text())
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline and name in self.controller._checking_apps:
+                    qt.processEvents()
+                    time.sleep(0.01)
+                qt.processEvents()
+                return asked, actions, card.state.text(), card.update_button.isVisibleTo(card)
+        finally:
+            self.controller.window.close()
+
+    def release(self, name, version):
+        from hanami import releases
+        asset = releases.Asset(f'{name}-{version}-win64.zip', 1, '0' * 64, 'https://example.invalid/a.zip')
+        return releases.Release(name, version, '', '', asset)
+
+    def test_menu_has_it_and_only_that_app_is_asked(self):
+        asked, actions, line, _ = self.check('Dockline', self.release('Dockline', '1.0.0'), Path(sys.executable))
+        self.assertEqual(actions[0], 'Check for updates')
+        self.assertEqual(asked, ['Dockline'])
+        self.assertIn('Up to date', line)
+
+    def test_newer_shows_update(self):
+        _, _, line, update = self.check('Keytap', self.release('Keytap', '9.0.0'), Path(sys.executable))
+        self.assertIn('Version 9.0.0 available', line)
+        self.assertTrue(update)
+
+    def test_failure_is_said(self):
+        _, _, line, _ = self.check('Grabbit', 'No connection to GitHub.', Path(sys.executable))
+        self.assertIn('No connection to GitHub.', line)
+
+
 class RestartTests(_Controlled):
     """An app quit for its update starts again in the tray (the user's wish, 2026-11-02); a new
     install opens."""
