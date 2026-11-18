@@ -311,16 +311,68 @@ class LensTests(unittest.TestCase):
                 self.assertEqual(where[3], margin)
                 self.assertEqual(where[2], widget.frameGeometry().adjusted(-margin, -margin, margin, margin))
 
+    def test_a_pop_up_at_the_screens_edge_is_cleaned_before_the_edge_is_filled_out(self):
+        from PySide6.QtGui import QImage
+        # The edge panel sits 10 px from the screen's right edge, so want reaches 150 px past got.
+        # Filling want out before taking the panel out stretched the panel itself past the edge,
+        # which made _scene_changed think what was behind it had changed on every frame and heal
+        # any text above it ("View dashboard") into vertical stripes down the glass.
+        want = QRect(1610, 100, 460, 300)
+        got = QRect(1610, 100, 310, 300)                        # the screen ends at x = 1920
+        panel = QRect(1770, 160, 140, 180)
+        covered = panel.adjusted(-suitetheme._SHADOW, -suitetheme._SHADOW,
+                                 suitetheme._SHADOW, suitetheme._SHADOW)
+        first = QImage(got.size(), QImage.Format_RGB32)
+        first.fill(QColor('#00ff00'))
+        p = QPainter(first)
+        for x in range(150, 220, 4):                            # fine text above the panel, inside covered's x
+            p.fillRect(x, 30, 2, 6, QColor('#0044ff'))
+        p.end()
+        before = suitetheme._clean(first, got, want)            # taken before the panel was on screen
+        later = QImage(first)
+        p = QPainter(later)
+        p.fillRect(covered.translated(-got.topLeft()).intersected(later.rect()), QColor('#005500'))     # its shadow
+        p.fillRect(panel.translated(-got.topLeft()), QColor('#ff0000'))                                 # the panel
+        p.end()
+        clean = suitetheme._clean(later, got, want, covered=covered, before=before, before_at=want.topLeft())
+        self.assertEqual(clean.size(), want.size())
+        self.assertEqual(clean.pixelColor(200, 150).name(), '#00ff00', 'the panel taken out, from before')
+        self.assertEqual(clean.pixelColor(360, 150).name(), '#00ff00', 'beyond the screen edge: no stretched panel')
+
+    def test_watching_around_a_still_pop_up_leaves_its_own_shadow_out(self):
+        self.assertGreaterEqual(suitetheme._AROUND[0], suitetheme._SHADOW,
+                                'what _watch_around looks at lies outside the pop-up’s own shadow')
+
+    def test_healing_a_changed_scene_blends_smoothly_without_stripes(self):
+        from PySide6.QtGui import QImage
+        shot = QImage(200, 200, QImage.Format_RGB32)
+        shot.fill(QColor('#ffffff'))
+        p = QPainter(shot)
+        for x in range(40, 120, 4):                             # sharp dark letters just above the healed part
+            p.fillRect(x, 26, 2, 3, QColor('#000000'))
+        p.fillRect(30, 30, 140, 140, QColor('#ff0000'))
+        p.end()
+        healed = suitetheme._heal(shot, [QRect(30, 30, 140, 140)])
+        row = [healed.pixelColor(x, 80).lightness() for x in range(45, 115)]
+        steps = [abs(a - b) for a, b in zip(row, row[1:])]
+        self.assertLess(max(steps), 10, f'smoothed across, no 1 px stripes: {steps[:12]}')
+
     def test_one_shot_at_a_time_for_each_window(self):
+        from PySide6.QtGui import QImage
         loop, came = QEventLoop(), []
         grabber = suitetheme._grabber()
-        self.assertTrue(grabber.take('a', QRect(0, 0, 4, 4), 1.0, lambda image: image.size(),
-                                     lambda made: (came.append(made), loop.quit())))
-        self.assertFalse(grabber.take('a', QRect(0, 0, 4, 4), 1.0, lambda image: None, lambda made: None))
-        QTimer.singleShot(3000, loop.quit)
-        loop.exec()
-        self.assertEqual(came, [QSize(4, 4)], 'taken on its own thread, handed back on this one')
-        self.assertTrue(grabber.take('a', QRect(0, 0, 4, 4), 1.0, lambda image: None, lambda made: None))
+        no_screen = suitetheme._screen_image(QRect(0, 0, 4, 4)) is None
+        patch = (mock.patch.object(suitetheme, '_screen_image',
+                                   lambda r: QImage(r.width(), r.height(), QImage.Format_RGB32))
+                 if no_screen else mock.MagicMock())
+        with patch:
+            self.assertTrue(grabber.take('a', QRect(0, 0, 4, 4), 1.0, lambda image: image.size(),
+                                         lambda made: (came.append(made), loop.quit())))
+            self.assertFalse(grabber.take('a', QRect(0, 0, 4, 4), 1.0, lambda image: None, lambda made: None))
+            QTimer.singleShot(3000, loop.quit)
+            loop.exec()
+            self.assertEqual(came, [QSize(4, 4)], 'taken on its own thread, handed back on this one')
+            self.assertTrue(grabber.take('a', QRect(0, 0, 4, 4), 1.0, lambda image: None, lambda made: None))
 
 
 class RimTests(unittest.TestCase):

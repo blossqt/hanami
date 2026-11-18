@@ -1393,6 +1393,38 @@ class PanelTests(_Controlled):
         self.assertFalse(window.edge_buttons['right'].isEnabled())
         window.close()
 
+    def test_sliding_out_takes_the_glass_from_where_it_rests_once(self):
+        from unittest import mock
+        from PySide6.QtGui import QColor, QGuiApplication, QPixmap
+        screen = QGuiApplication.primaryScreen()
+        rest, _ = self.panel._places(self.screen)
+        taken, later = [], []
+
+        def grab(win_id, x=0, y=0, w=-1, h=-1):
+            taken.append((self.panel.pos(), self.panel.windowOpacity()))
+            pm = QPixmap(max(1, w), max(1, h))
+            pm.fill(QColor('#f4f5f8'))
+            return pm
+
+        self.point = rest + self.QPoint(20, 40)
+        with mock.patch.object(self.suitetheme, 'glass_on', lambda: True), \
+                mock.patch.object(self.suitetheme, 'look', lambda: 'liquid'), \
+                mock.patch.object(self.suitetheme, 'motion_on', lambda: True), \
+                mock.patch.object(self.panel_module.theme, 'motion_on', lambda: True), \
+                mock.patch.object(type(screen), 'grabWindow', lambda s, *a: grab(*a)), \
+                mock.patch.object(self.suitetheme, '_capture_later', lambda w, final: later.append(final) or True), \
+                mock.patch.object(self.suitetheme, '_watch_around', lambda *a, **kw: None), \
+                mock.patch.object(self.suitetheme, '_drag_images', lambda native: []):
+            self.panel.slide_out(self.screen)
+            deadline = time.monotonic() + 0.45
+            while time.monotonic() < deadline:
+                qt.processEvents()
+                time.sleep(0.01)
+            self.assertEqual(taken, [(rest, 0.0)], 'taken once, unseen, at its resting place')
+            self.assertEqual(later, [], 'sliding into place does not re-capture the moving panel')
+            self.assertEqual(self.panel.pos(), rest)
+            self.panel.hide()
+
 
 
 class WindowThreadTests(_Controlled):
@@ -1866,4 +1898,5 @@ class FullScreenTests(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main(verbosity=2)
+    result = unittest.main(verbosity=2, exit=False).result
+    hanami.theme.leave(0 if result.wasSuccessful() else 1)

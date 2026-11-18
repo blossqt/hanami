@@ -1196,7 +1196,7 @@ class EdgePanel(QWidget):
             self.move(rest)
             self.show()
             return
-        self.move(start)
+        self.move(rest)                             # unseen at its place first, so its glass takes what is behind it
         self.setWindowOpacity(0.0)
         self.show()
         if theme.look() == 'liquid':
@@ -1233,14 +1233,20 @@ class EdgePanel(QWidget):
 
     def _slide(self, start: QPoint, end: QPoint, ms: int, curve, then=None) -> None:
         theme.stop_animation(self._sliding)
+        self._suite_gliding = True
+        self.move(start)
         slide = QPropertyAnimation(self, b'pos', self)
         slide.setDuration(ms)
         slide.setStartValue(start)
         slide.setEndValue(end)
         slide.setEasingCurve(curve)
         coming = then is None
+        from_opacity = self.windowOpacity()
         slide.valueChanged.connect(lambda _: self.setWindowOpacity(
-            min(1.0, slide.currentTime() / (ms * 0.6)) if coming else max(0.0, 1 - slide.currentTime() / ms)))
+            min(1.0, slide.currentTime() / (ms * 0.6)) if coming
+            else from_opacity * max(0.0, 1 - slide.currentTime() / ms)))
+        slide.stateChanged.connect(lambda state, _=None: state == slide.State.Stopped
+                                   and setattr(self, '_suite_gliding', False))
         if then is not None:
             slide.finished.connect(then)
         else:
@@ -1259,7 +1265,7 @@ class EdgePanel(QWidget):
         photo = self._cropped_photo()
         if photo is not None:
             path = QPainterPath()
-            path.addRoundedRect(rect, radius, radius)
+            path.addRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
             painter.setClipPath(path)
             painter.setOpacity(theme.BACKDROP_OPACITY)      # as faint as the main windows' backdrops
             painter.drawPixmap(0, 0, photo)
