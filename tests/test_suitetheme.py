@@ -149,6 +149,109 @@ class ChoicesTests(unittest.TestCase):
         window.close()
 
 
+class LiquidClearTests(unittest.TestCase):
+    """How see-through the liquid glass is: chosen in Hanami (0 to 100), its tint thinned or
+    thickened to match."""
+
+    def setUp(self):
+        self._key = suitetheme._LOOK_KEY
+        suitetheme._LOOK_KEY = TEST_KEY
+        suitetheme._clear_value = None
+
+    def tearDown(self):
+        suitetheme._LOOK_KEY = self._key
+        suitetheme._clear_value = None
+        try:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, TEST_KEY)
+        except OSError:
+            pass
+
+    def test_unset_it_is_as_the_glass_always_was(self):
+        self.assertEqual(suitetheme.liquid_clear(), suitetheme.CLEAR_DEFAULT)
+        self.assertEqual(suitetheme._clear_scaled(100), 100)
+
+    def test_clearer_thins_the_tint_and_less_clear_thickens_it(self):
+        suitetheme.set_liquid_clear(100)
+        self.assertEqual(suitetheme._clear_scaled(160), 0, 'fully clear: no tint')
+        suitetheme.set_liquid_clear(75)
+        self.assertEqual(suitetheme._clear_scaled(160), 80)
+        suitetheme.set_liquid_clear(0)
+        self.assertEqual(suitetheme._clear_scaled(160), 255, 'twice as thick, as far as it goes')
+        suitetheme.set_liquid_clear(250)
+        self.assertEqual(suitetheme.liquid_clear(), 100, 'kept within 0 to 100')
+
+    def test_another_app_takes_it_within_seconds(self):
+        suitetheme.liquid_clear()
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, TEST_KEY) as key:      # as Hanami, elsewhere
+            winreg.SetValueEx(key, 'LiquidClear', 0, winreg.REG_DWORD, 30)
+        called = []
+        suitetheme.on_restyle(lambda: called.append(True))
+        suitetheme._look_changed()
+        self.assertEqual(suitetheme.liquid_clear(), 30)
+        self.assertTrue(called)
+
+
+class GlassLibraryTests(unittest.TestCase):
+    """The liquid glass drawn pixel by pixel, by glasslens.dll."""
+
+    def test_the_library_is_there_and_loads(self):
+        self.assertTrue(os.path.isfile(suitetheme.GLASS_LENS_FILE), 'build it with build\\build_glasslens.ps1')
+        self.assertIsNotNone(suitetheme._lens_library())
+
+    def test_the_middle_bends_too(self):
+        """The face is domed: what is behind is drawn in towards the middle, so a stripe a little
+        way from the middle shows nearer it than it really is."""
+        m = suitetheme._MARGIN
+        shot = QPixmap(240 + 2 * m, 160 + 2 * m)
+        painter = QPainter(shot)
+        for x in range(shot.width()):                   # a ramp: how far along, as how red
+            painter.fillRect(x, 0, 1, shot.height(), QColor(min(255, x), 0, 0))
+        painter.end()
+        spec = dict(suitetheme._LENSES['liquid'], spread=0.0)
+        lens = suitetheme._lens(shot, m, m, 240, 160, spec).toImage()
+        middle = lens.pixelColor(120, 80).red()
+        self.assertLessEqual(abs(middle - (m + 120)), 1, 'the very middle: as it is')
+        self.assertGreater(lens.pixelColor(80, 80).red(), m + 80 + 2, 'left of it: from nearer the middle')
+        self.assertLess(lens.pixelColor(160, 80).red(), m + 160 - 2, 'right of it: from nearer the middle')
+
+    def test_outside_the_rounded_corners_it_is_clear(self):
+        m = suitetheme._MARGIN
+        shot = QPixmap(200 + 2 * m, 120 + 2 * m)
+        shot.fill(QColor('#00ff00'))
+        lens = suitetheme._lens(shot, m, m, 200, 120, suitetheme._LENSES['liquid']).toImage()
+        self.assertEqual(lens.pixelColor(0, 0).alpha(), 0)
+        self.assertEqual(lens.pixelColor(100, 60).alpha(), 255)
+
+    def test_a_pop_ups_glass_takes_about_a_millisecond(self):
+        m = suitetheme._MARGIN_FRAMELESS
+        shot = QPixmap(440 + 2 * m, 300 + 2 * m)
+        shot.fill(QColor('#808080'))
+        runs = []
+        for _ in range(9):
+            start = time.perf_counter()
+            suitetheme._lens(shot, m, m, 440, 300, suitetheme._LENSES['liquid'])
+            runs.append(time.perf_counter() - start)
+        self.assertLess(sorted(runs)[4], 0.006, f'{sorted(runs)[4] * 1000:.1f} ms')
+
+
+class LensWithoutTheLibraryTests(unittest.TestCase):
+    """Without glasslens.dll (an app built without it), the bevel is drawn with Qt."""
+
+    def setUp(self):
+        suitetheme._glass_lens = False
+
+    def tearDown(self):
+        suitetheme._glass_lens = None
+
+    def test_the_bevel_still_bends_and_colours_still_part(self):
+        tests = LensTests()
+        tests.test_the_middle_is_clear_and_the_rim_bends_in_what_is_beyond()
+        tests.test_the_bend_is_one_smooth_curve()
+        tests.test_colours_part_along_the_rim()
+        tests.test_a_slim_pop_up_keeps_a_flat_middle()
+        tests.test_a_framed_windows_rim_leaves_its_middle_out()
+
+
 class LiquidTests(unittest.TestCase):
     """The liquid look's parts that don't need a real window: glass is pretended on."""
 

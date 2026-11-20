@@ -239,6 +239,33 @@ class GameTests(_Controlled):
         self.assertEqual(self.suitetheme.game_downloads(), 'pause')
 
 
+class LiquidClearSettingTests(_Controlled):
+    """The liquid glass's transparency, chosen on the Appearance page for the whole suite."""
+
+    def tearDown(self):
+        self.suitetheme._look = self.suitetheme._clear_value = None
+        super().tearDown()
+
+    def test_the_slider_sets_it_and_works_only_on_liquid_glass(self):
+        from unittest import mock
+        from hanami.ui import theme
+        with mock.patch.object(self.suitetheme, 'glass_on', lambda: True), \
+                mock.patch.object(theme, 'glass_on', lambda: True):
+            self.suitetheme.set_look('liquid')
+            window = SettingsWindow([], False, (True, True, False))
+            self.assertTrue(window.clear_slider.isEnabled())
+            self.assertEqual(window.clear_slider.value(), self.suitetheme.CLEAR_DEFAULT)
+            window.clear_slider.setValue(80)
+            self.assertEqual(self.suitetheme.liquid_clear(), 80)
+            self.assertEqual(window.clear_shown.text(), '80%')
+            self.suitetheme._clear_value = None                  # as another app would, reading it afresh
+            self.assertEqual(self.suitetheme.liquid_clear(), 80, 'kept for the suite')
+            self.suitetheme.set_look('frosted')
+            window._appearance_changed()
+            self.assertFalse(window.clear_slider.isEnabled(), 'frosted glass has no such setting')
+            window.close()
+
+
 class SoundTests(_Controlled):
     """The speakers and the headphones: chosen in Settings, switched between from the main window
     and with the hotkey. Windows' outputs are stand-ins - the real ones are never changed."""

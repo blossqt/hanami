@@ -105,8 +105,9 @@ class _LookTile(QAbstractButton):
         dark = theme.is_dark()
         if self.look == 'liquid':
             tint = QLinearGradient(pane.topLeft(), pane.bottomLeft())
-            tint.setColorAt(0, QColor(62, 58, 70, 70) if dark else QColor(255, 255, 255, 60))
-            tint.setColorAt(1, QColor(12, 10, 16, 70) if dark else QColor(178, 178, 184, 60))
+            alpha = suitetheme._clear_scaled(70 if dark else 60)       # as transparent as chosen
+            tint.setColorAt(0, QColor(62, 58, 70, alpha) if dark else QColor(255, 255, 255, alpha))
+            tint.setColorAt(1, QColor(12, 10, 16, alpha) if dark else QColor(178, 178, 184, alpha))
             p.fillPath(shape, tint)
         else:
             p.fillPath(shape, QColor(18, 16, 24, 118) if dark else QColor(255, 255, 255, 128))
@@ -128,7 +129,8 @@ class _LookTile(QAbstractButton):
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect()).adjusted(3, 3, -3, -3)
         preview = QRectF(r.x(), r.y(), r.width(), r.height() - 28)
-        key = (round(preview.width()), round(preview.height()), self.devicePixelRatioF(), theme.is_dark())
+        key = (round(preview.width()), round(preview.height()), self.devicePixelRatioF(), theme.is_dark(),
+               theme.liquid_clear() if self.look == 'liquid' else None)
         if key != self._picture_key:
             self._picture = self._render(preview)
             self._picture_key = key
@@ -427,6 +429,21 @@ class SettingsWindow(QWidget):
             tiles.addWidget(tile)
         tiles.addStretch(1)
         box.addLayout(tiles)
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        self.clear_slider = QSlider(Qt.Horizontal)
+        self.clear_slider.setRange(0, 100)
+        self.clear_slider.setValue(theme.liquid_clear())
+        self.clear_slider.setCursor(Qt.PointingHandCursor)
+        self.clear_slider.setAccessibleName('Liquid glass transparency')
+        self.clear_shown = _label(f'{theme.liquid_clear()}%', role='dim')
+        self.clear_shown.setMinimumWidth(48)
+        self.clear_slider.valueChanged.connect(self._clear_edited)
+        row.addWidget(_label('Liquid glass transparency'))
+        row.addWidget(self.clear_slider, 1)
+        row.addWidget(self.clear_shown)
+        box.addLayout(row)
+        self._show_clear_enabled()
         if not theme.glass_on():
             box.addWidget(_label('Glass needs Windows 11 with transparency effects on (Settings > Personalisation > '
                                  'Colours).', suitesettings.SMALL, role='dim', wrap=True))
@@ -884,6 +901,17 @@ class SettingsWindow(QWidget):
         self.checked.setText(text)
         self.check_button.setEnabled(not checking)
 
+    def _clear_edited(self, value: int) -> None:
+        self.clear_shown.setText(f'{value}%')
+        theme.set_liquid_clear(value)
+        self.look_tiles['liquid'].update()
+
+    def _show_clear_enabled(self) -> None:
+        """The transparency slider works only on liquid glass."""
+        on = theme.glass_on() and theme.look() == 'liquid'
+        self.clear_slider.setEnabled(on)
+        self.clear_slider.setToolTip('' if on else 'Applies to Liquid glass.')
+
     def _appearance_changed(self) -> None:
         """The look, light or dark, or the animations changed (here, or in another copy): the
         choices show it."""
@@ -893,6 +921,12 @@ class SettingsWindow(QWidget):
             for name, tile in self.look_tiles.items():
                 tile.setChecked(theme.look() == name)
                 tile.update()
+            self._show_clear_enabled()
+            if self.clear_slider.value() != theme.liquid_clear() and not self.clear_slider.isSliderDown():
+                self.clear_slider.blockSignals(True)
+                self.clear_slider.setValue(theme.liquid_clear())
+                self.clear_shown.setText(f'{theme.liquid_clear()}%')
+                self.clear_slider.blockSignals(False)
             if self.motion.isChecked() != theme.motion_chosen():
                 self.motion.blockSignals(True)
                 self.motion.setChecked(theme.motion_chosen())
