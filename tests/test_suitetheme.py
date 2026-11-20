@@ -218,7 +218,43 @@ class LensTests(unittest.TestCase):
         lens = suitetheme._lens(shot, m, m, 200, 120, suitetheme._LENSES['liquid']).toImage()
         self.assertEqual(lens.pixelColor(100, 60).name(), '#00ff00', 'the middle: what is behind, as it is')
         self.assertGreater(lens.pixelColor(0, 60).red(), 200, 'the rim: light from beyond the left edge')
-        self.assertEqual(lens.pixelColor(12, 60).name(), '#00ff00', 'the bend stays at the rim')
+        self.assertGreater(lens.pixelColor(8, 60).red(), 200,
+                           'the bend reaches well in, where it shows: until 2026-11-20 it was gone 4 px in')
+        self.assertEqual(lens.pixelColor(40, 60).name(), '#00ff00', 'past the bevel, the glass is flat')
+
+    def test_the_bend_is_one_smooth_curve(self):
+        """Across the bevel, what each pixel shows comes from steadily further in: no line of it
+        shows something its neighbour nearer the rim has already passed."""
+        m = suitetheme._MARGIN
+        shot = QPixmap(200 + 2 * m, 120 + 2 * m)
+        painter = QPainter(shot)
+        for x in range(shot.width()):                   # a ramp: how far along, as how red
+            painter.fillRect(x, 0, 1, shot.height(), QColor(min(255, x), 0, 0))
+        painter.end()
+        spec = dict(suitetheme._LENSES['liquid'], spread=0.0)
+        lens = suitetheme._lens(shot, m, m, 200, 120, spec).toImage()
+        reds = [lens.pixelColor(x, 60).red() for x in range(40)]
+        self.assertEqual(reds, sorted(reds), reds)
+        self.assertLess(reds[0], m - 20, 'the rim shows what lies well beyond the edge')
+
+    def test_colours_part_along_the_rim(self):
+        m = suitetheme._MARGIN
+        shot = QPixmap(200 + 2 * m, 120 + 2 * m)
+        shot.fill(QColor('#ffffff'))
+        painter = QPainter(shot)
+        painter.fillRect(m - 40, 0, 12, shot.height(), QColor('#000000'))   # a dark line beyond the left edge
+        painter.end()
+        lens = suitetheme._lens(shot, m, m, 200, 120, suitetheme._LENSES['liquid']).toImage()
+        parted = max(abs(lens.pixelColor(x, 60).red() - lens.pixelColor(x, 60).blue()) for x in range(36))
+        self.assertGreater(parted, 60, 'red and blue bend apart, so the line shows a coloured fringe')
+        self.assertEqual(lens.pixelColor(100, 60).name(), '#ffffff', 'the middle keeps its colours together')
+
+    def test_a_slim_pop_up_keeps_a_flat_middle(self):
+        m = suitetheme._MARGIN
+        shot = self.shot(240 + 2 * m, 40 + 2 * m)
+        lens = suitetheme._lens(shot, m, m, 240, 40, suitetheme._LENSES['liquid']).toImage()
+        self.assertEqual(lens.pixelColor(120, 20).name(), '#00ff00')
+        self.assertGreater(lens.pixelColor(0, 20).red(), 200)
 
     def test_a_framed_windows_rim_leaves_its_middle_out(self):
         m = suitetheme._MARGIN
