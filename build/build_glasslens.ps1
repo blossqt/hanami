@@ -9,7 +9,7 @@ if (-not (Test-Path (Join-Path $bin 'gcc.exe'))) { throw "No GCC at $bin (Grabbi
 $env:PATH = "$bin;$env:PATH"
 Push-Location $ui
 try {
-    & gcc -O3 -march=x86-64-v2 -ffast-math -shared -static-libgcc -s -o glasslens.dll glasslens.c
+    & gcc -O3 -march=x86-64-v2 -ffast-math -shared -static-libgcc -s -o glasslens.dll glasslens.c glasslive.c -ldwmapi -lgdi32 -luser32
     if ($LASTEXITCODE -ne 0) { throw 'gcc failed' }
     & objdump -p glasslens.dll | Select-String 'DLL Name'
 } finally {

@@ -52,6 +52,7 @@ COPIES = {
     # the liquid glass, pixel by pixel (builduild_glasslens.ps1), and its source, beside suitetheme.py
     ROOT / 'app' / 'hanami' / 'ui' / 'glasslens.dll': [app / 'ui' for app in QT_APPS + [KEYGLOW]] + [DOCKLINE],
     ROOT / 'app' / 'hanami' / 'ui' / 'glasslens.c': [app / 'ui' for app in QT_APPS + [KEYGLOW]] + [DOCKLINE],
+    ROOT / 'app' / 'hanami' / 'ui' / 'glasslive.c': [app / 'ui' for app in QT_APPS + [KEYGLOW]] + [DOCKLINE],
     ROOT / 'app' / 'hanami' / 'suitelog.py': QT_APPS + [KEYGLOW, DOCUMENTS / 'homework-hub'],
     ROOT / 'app' / 'hanami' / 'suiteocr.py': [DOCUMENTS / 'Dropshift' / 'app' / 'dropshift'],
     ROOT / 'app' / 'hanami' / 'suiteweb.py': [DOCUMENTS / 'Dropshift' / 'app' / 'dropshift',

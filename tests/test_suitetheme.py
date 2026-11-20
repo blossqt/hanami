@@ -180,6 +180,17 @@ class LiquidClearTests(unittest.TestCase):
         suitetheme.set_liquid_clear(250)
         self.assertEqual(suitetheme.liquid_clear(), 100, 'kept within 0 to 100')
 
+    def test_text_behind_still_tints_it_however_clear(self):
+        """At 85% the user saw the text of the window behind Hanami's read as clearly as its own: what
+        text behind adds to the tint stays, mostly, however clear the glass is chosen."""
+        suitetheme.set_liquid_clear(50)
+        self.assertEqual(suitetheme._clear_scaled(40, 150, 235), 190, 'as it has always been')
+        suitetheme.set_liquid_clear(85)
+        self.assertEqual(suitetheme._clear_scaled(40, 0, 235), 12, 'calm behind: clear')
+        self.assertGreaterEqual(suitetheme._clear_scaled(40, 150, 235), 130, 'text behind: still tinted')
+        suitetheme.set_liquid_clear(100)
+        self.assertEqual(suitetheme._clear_scaled(40, 150, 235), 120)
+
     def test_another_app_takes_it_within_seconds(self):
         suitetheme.liquid_clear()
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, TEST_KEY) as key:      # as Hanami, elsewhere
@@ -232,6 +243,31 @@ class GlassLibraryTests(unittest.TestCase):
             suitetheme._lens(shot, m, m, 440, 300, suitetheme._LENSES['liquid'])
             runs.append(time.perf_counter() - start)
         self.assertLess(sorted(runs)[4], 0.006, f'{sorted(runs)[4] * 1000:.1f} ms')
+
+
+class LiveGlassTests(unittest.TestCase):
+    """A framed liquid window's live glass (glasslive.c): DWM thumbnails of what is behind, bent.
+    What it looks like is judged on screen (Keytap\\.dev\\liquid\\live_app.py); here, that it is
+    there and stays out of the way where it cannot work."""
+
+    def test_the_library_has_it(self):
+        lens = suitetheme._live_library()
+        self.assertIsNotNone(lens)
+        self.assertEqual(set(lens), {'open', 'update', 'close'})
+
+    def test_a_window_gone_is_not_worked_on(self):
+        lens = suitetheme._live_library()
+        state = lens['open'](0, 0)
+        self.assertEqual(lens['update'](state, 36, 48, 1.06), -1)
+        lens['close'](state)
+
+    def test_none_offscreen_or_frosted(self):
+        window = QWidget()
+        suitetheme.frost(window)
+        window.show()
+        app.processEvents()
+        self.assertFalse(suitetheme._live_on(window), 'offscreen: no live glass, and no helper window')
+        window.close()
 
 
 class LensWithoutTheLibraryTests(unittest.TestCase):
