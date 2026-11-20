@@ -1,0 +1,219 @@
+--- Craft Anything 0.6.1: a run started 2026-11-18 05:54:12 UTC ---
+05:54:12 stage Getting the builder ready…
+05:54:16 stage Building the first version…
+05:54:17 note  Asking Antigravity…
+05:54:28 start read file
+05:54:28 done  read file
+05:54:28 start read file
+05:54:28 done  read file: 210 lines, 10214 bytes
+05:54:37 start run command
+05:54:39 done  run command (1 s): Created At: 2026-11-18T00:54:37-05:00 Completed At: 2026-11-18T00:54:38-05:00 Command exited with code 0. Command output: FullName
+05:54:46 start read file
+05:54:46 done  read file: 1281 lines, 56907 bytes
+05:54:46 start read file
+05:54:46 done  read file: 221 lines, 9985 bytes
+05:54:51 start read file
+05:54:51 done  read file: 1281 lines, 56907 bytes
+05:54:51 start read file
+05:54:51 done  read file: 12 lines, 536 bytes
+05:54:51 start read file
+05:54:51 done  read file: 3574 lines, 162690 bytes
+05:54:59 start read file
+05:54:59 done  read file: 3574 lines, 162690 bytes
+05:54:59 start read file
+05:54:59 done  read file: 3574 lines, 162690 bytes
+05:55:06 start read file
+05:55:06 done  read file: 3574 lines, 162690 bytes
+05:55:06 start read file
+05:55:06 done  read file: 3574 lines, 162690 bytes
+05:55:36 start run command
+05:55:36 done  run command: Created At: 2026-11-18T00:55:35-05:00 Completed At: 2026-11-18T00:55:36-05:00 Command exited with code 0. Command output: 892373b Hanami 0.1.83: "Find it on this PC" opens where the app is 1caf45d Ha
+05:55:48 start run command
+05:55:48 done  run command: Created At: 2026-11-18T00:55:47-05:00 Completed At: 2026-11-18T00:55:48-05:00 Command exited with code 0. Command output: 0587543 Readable glass: the clear tint reads text behind the window as busy (
+05:55:54 start run command
+05:55:55 done  run command: The tool's output was truncated due to being too long. You can find the full output in a file at file:///C:/Users/haoch/.gemini/antigravity-cli/brain/1f31c9ec-6240-4ae0-bac6-00bc1b930dfc/.system_gener
+05:55:55 start read file
+05:55:55 done  read file: 872 lines, 40776 bytes
+05:56:40 start run command
+05:56:41 done  run command (1 s): Created At: 2026-11-18T00:56:39-05:00 Completed At: 2026-11-18T00:56:41-05:00 Command exited with code 1. Command output: & : The term 'C:\Users\haoch\AppData\Local\HanamiBuild\venv\Scripts\python.ex
+05:56:51 start read file
+05:56:51 done  read file: 28 lines, 1201 bytes
+05:56:51 start read file
+05:56:51 done  read file: 64 lines, 3364 bytes
+05:57:00 start run command
+05:57:02 done  run command (1 s): Created At: 2026-11-18T00:57:00-05:00 Completed At: 2026-11-18T00:57:02-05:00 Command exited with code 0. Command output: -V:3.12 * C:\Users\haoch\AppData\Local\Programs\Python\Python312\pyth
+05:57:11 start run command
+05:57:13 done  run command (1 s): Created At: 2026-11-18T00:57:11-05:00 Completed At: 2026-11-18T00:57:13-05:00 Command exited with code 0. Command output: LOCALAPPDATA=C:\Users\haoch\AppData\Local FullName
+05:57:18 start read file
+05:57:18 done  read file: 10 lines, 386 bytes
+05:57:30 start run command
+05:57:31 done  run command (1 s): Created At: 2026-11-18T00:57:29-05:00 Completed At: 2026-11-18T00:57:31-05:00 Command exited with code 0. Command output: 207 426
+05:57:42 start read file
+05:57:42 done  read file
+05:57:42 start read file
+05:57:42 done  read file
+05:58:43 start run command
+05:58:45 done  run command (1 s): Created At: 2026-11-18T00:58:43-05:00 Completed At: 2026-11-18T00:58:45-05:00 Command exited with code 0. Command output: size: 207 426 y=0: {'#e4ffff', '#e4a058', '#a3e2ff', '#327cc3', '#ffffff'}
+05:59:05 start read file
+05:59:05 done  read file: 264 lines, 11232 bytes
+05:59:05 start read file
+05:59:05 done  read file: 907 lines, 44228 bytes
+06:00:03 start run command
+06:00:05 done  run command (1 s): Created At: 2026-11-18T01:00:02-05:00 Completed At: 2026-11-18T01:00:04-05:00 Command exited with code 0. Command output: left area: [(50, '#171717'), (51, '#171717'), (52, '#161616'), (53, '#161616'
+06:01:22 start read file
+06:01:22 done  read file: 907 lines, 44228 bytes
+06:01:22 start read file
+06:01:22 done  read file: 907 lines, 46815 bytes
+06:01:29 start read file
+06:01:29 done  read file: 81 lines, 4265 bytes
+06:01:38 start read file
+06:01:38 done  read file: 362 lines, 16412 bytes
+06:03:21 start run command
+06:03:23 done  run command (1 s): Created At: 2026-11-18T01:03:21-05:00 Completed At: 2026-11-18T01:03:23-05:00 Command exited with code 0. Command output: y=28 left 40px: ['#bbbebe', '#bbbebf', '#f2f1f4', '#f7f7fa', '#f7f6f9', '#f6f
+06:04:53 start run command
+06:04:55 done  run command (1 s): Created At: 2026-11-18T01:04:53-05:00 Completed At: 2026-11-18T01:04:55-05:00 Command exited with code 0. Command output: y=300 left of x=58: [(28, '#e4e8ef'), (26, '#e3e7ee'), (24, '#e3e7ee'), (22,
+06:07:06 start run command
+06:07:08 done  run command (1 s): Created At: 2026-11-18T01:07:06-05:00 Completed At: 2026-11-18T01:07:08-05:00 Command exited with code 0. Command output: Package Version ------------------------- --------- altgr
+06:07:22 start run command
+06:07:55 done  run command (32 s): Command exited with code 0. Command output: venv C:\Users\haoch\AppData\Local\HanamiBuild\venv Collecting PySide6-Essentials==6.11.2 (from -r C:\Users\haoch\Documents\Hanami\build\requirements.txt
+06:07:55 start read file
+06:07:55 done  read file: 1869 lines, 99252 bytes
+06:07:56 start read file
+06:07:56 done  read file: 1869 lines, 99252 bytes
+06:07:56 start read file
+06:07:56 done  read file: 1869 lines, 99252 bytes
+06:08:30 start write file
+06:08:31 done  write file (1 s)
+06:08:47 start run command
+06:08:51 done  run command (3 s): Created At: 2026-11-18T01:08:47-05:00 Completed At: 2026-11-18T01:08:51-05:00 Command exited with code 0. Command output: screen: PySide6.QtCore.QRect(0, 0, 800, 800) rest: PySide6.QtCore.QPoint(650,
+06:09:27 start write file
+06:09:29 done  write file (1 s)
+06:09:39 start run command
+06:09:43 done  run command (4 s): Created At: 2026-11-18T01:09:38-05:00 Completed At: 2026-11-18T01:09:43-05:00 Command exited with code 0. Command output: Total captures in 2.5s: 42 + 0ms rect=(641,47,159,706) vis=True pos=(801
+06:09:54 start read file
+06:09:54 done  read file
+06:12:39 start read file
+06:12:39 done  read file: 1036 lines, 44740 bytes
+06:13:49 start run command
+06:13:51 done  run command (1 s): Created At: 2026-11-18T01:13:49-05:00 Completed At: 2026-11-18T01:13:50-05:00 Command exited with code 0. Command output: tests\test_suitetheme.py:266: healed = suitetheme._heal(shot, [QRect
+06:15:16 start read file
+06:15:16 done  read file: 3574 lines, 162690 bytes
+06:15:16 start read file
+06:15:16 done  read file: 3574 lines, 162690 bytes
+06:15:16 start read file
+06:15:16 done  read file: 3574 lines, 162690 bytes
+06:16:00 start read file
+06:16:00 done  read file: 1281 lines, 56907 bytes
+06:16:37 start edit file
+06:16:38 done  edit file
+06:16:38 start edit file
+06:16:39 done  edit file (1 s)
+06:16:50 start read file
+06:16:50 done  read file: 3574 lines, 162690 bytes
+06:18:37 start edit file
+06:18:38 done  edit file (1 s)
+06:18:38 start edit file
+06:18:39 done  edit file (1 s)
+06:18:39 start edit file
+06:18:41 done  edit file (1 s)
+06:18:41 start edit file
+06:18:43 done  edit file (1 s)
+06:18:43 start edit file
+06:18:44 done  edit file (1 s)
+06:18:44 start edit file
+06:18:46 done  edit file (1 s)
+06:18:59 start edit file
+06:19:00 done  edit file (1 s)
+06:19:07 start run command
+06:19:11 done  run command (4 s): Created At: 2026-11-18T01:19:06-05:00 Completed At: 2026-11-18T01:19:11-05:00 Command exited with code 0. Command output: Total captures in 2.5s: 6 + 0ms rect=(490,47,310,706) vis=True pos=(650,
+06:19:35 start read file
+06:19:35 done  read file
+06:20:03 start write file
+06:20:04 done  write file (1 s)
+06:20:10 start run command
+06:20:14 done  run command (3 s): Created At: 2026-11-18T01:20:10-05:00 Completed At: 2026-11-18T01:20:14-05:00 Command exited with code 0. No output from the command.
+06:20:31 start read file
+06:20:31 done  read file
+06:20:31 start read file
+06:20:31 done  read file
+06:20:49 start run command
+06:20:57 done  run command (8 s): Created At: 2026-11-18T01:20:48-05:00 Completed At: 2026-11-18T01:20:57-05:00 Command exited with code 1. Command output: test_an_apps_own_choice_wins (__main__.ChoicesTests.test_an_apps_own_choice_w
+06:21:12 start run command
+06:21:52 done  run command (40 s): The tool's output was truncated due to being too long. You can find the full output in a file at file:///C:/Users/haoch/.gemini/antigravity-cli/brain/1f31c9ec-6240-4ae0-bac6-00bc1b930dfc/.system_gener
+06:21:52 start read file
+06:21:52 done  read file: 4 lines, 118 bytes
+06:21:52 start read file
+06:21:52 done  read file: 27 lines, 794 bytes
+06:21:57 start read file
+06:21:57 done  read file: 872 lines, 40776 bytes
+06:22:10 start read file
+06:22:10 done  read file: 108 lines, 10602 bytes
+06:22:32 start run command
+06:23:10 done  run command (37 s): Command exited with code 0. Command output: === tests\test_link.py === test_join_click_and_rejoin (__main__.LinkTest.test_join_click_and_rejoin) ... ok test_two_apps_and_a_stale_copy (__main__.LinkT
+06:23:10 start read file
+06:23:10 done  read file: 1869 lines, 99252 bytes
+06:23:17 start read file
+06:23:17 done  read file: 1869 lines, 99252 bytes
+06:24:06 start edit file
+06:24:08 done  edit file (1 s)
+06:24:08 start edit file
+06:24:09 done  edit file (1 s)
+06:24:20 start run command
+06:24:33 done  run command (12 s): Command exited with code 1. Command output: test_an_apps_own_choice_wins (__main__.ChoicesTests.test_an_apps_own_choice_wins) ... ok test_animations_can_be_turned_off (__main__.ChoicesTests.test_ani
+06:24:43 start run command
+06:24:44 done  run command (1 s): Created At: 2026-11-18T01:24:42-05:00 Completed At: 2026-11-18T01:24:44-05:00 Command exited with code 1. Command output: ERROR: Hanami is running from C:\Users\haoch\Documents\Hanami\dist\Hanami - q
+06:24:59 start read file
+06:24:59 done  read file: 22 lines, 713 bytes
+06:24:59 start read file
+06:24:59 done  read file: 1904 lines, 93316 bytes
+06:25:07 start read file
+06:25:07 done  read file: 1904 lines, 93316 bytes
+06:25:20 start run command
+06:25:21 done  run command (1 s): Created At: 2026-11-18T01:25:19-05:00 Completed At: 2026-11-18T01:25:21-05:00 Command exited with code 0. Command output: Id Path -- ----
+06:25:52 start run command
+06:26:27 done  run command (35 s): Command exited with code 0. Command output: >> import check >> icon wrote C:\Users\haoch\Documents\Hanami\build\hanami.ico (21574 bytes, 9 sizes) >> PyInstaller 168 INFO: PyInstaller: 6.22.3, contri
+06:26:27 start run command
+06:26:27 done  run command: Created At: 2026-11-18T01:26:12-05:00 Completed At: 2026-11-18T01:26:13-05:00 Command exited with code 0. Command output: M app/hanami/suitelink.py M app/hanami/ui/panel.py M app/hanami/ui/suiteth
+06:26:27 start read file
+06:26:27 done  read file: 47 lines, 1913 bytes
+06:26:27 start run command
+06:26:27 done  run command: Created At: 2026-11-18T01:26:24-05:00 Completed At: 2026-11-18T01:26:25-05:00 Command exited with code 0. Command output: diff --git a/app/hanami/ui/panel.py b/app/hanami/ui/panel.py index af1dae1..9
+06:26:34 start run command
+06:26:34 done  run command: The tool's output was truncated due to being too long. You can find the full output in a file at file:///C:/Users/haoch/.gemini/antigravity-cli/brain/1f31c9ec-6240-4ae0-bac6-00bc1b930dfc/.system_gener
+06:26:47 start run command
+06:27:46 out   root agent idle; waiting for 2 background task(s) to finish
+06:28:07 done  run command (80 s): Command exited with code 1. Command output: PASSED: tests\test_suitetheme.py FAILED (-1073741819): tests\test_settings.py File "C:\Users\haoch\Documents\Hanami\tests\test_settings.py", line 103, in
+06:28:07 start run command
+06:28:07 done  run command: Created At: 2026-11-18T01:27:09-05:00 Completed At: 2026-11-18T01:27:09-05:00 Command exited with code 0. Command output: M app/hanami/suitelink.py M app/hanami/ui/panel.py M app/hanami/ui/suiteth
+06:28:07 start read file
+06:28:07 done  read file: 143 lines, 5909 bytes
+06:28:07 start schedule
+06:28:08 done  schedule: Timer cancelled early: its early-termination condition (any) was met by a message from 1f31c9ec-6240-4ae0-bac6-00bc1b930dfc/task-160.
+06:28:08 said  Running the full test suite now and waiting for it to finish.
+06:28:22 start read file
+06:28:22 done  read file: 924 lines, 44164 bytes
+06:28:22 start read file
+06:28:22 done  read file: 370 lines, 19096 bytes
+06:28:41 start edit file
+06:28:44 done  edit file (2 s)
+06:28:56 start run command
+06:29:38 done  run command (41 s): The tool's output was truncated due to being too long. You can find the full output in a file at file:///C:/Users/haoch/.gemini/antigravity-cli/brain/1f31c9ec-6240-4ae0-bac6-00bc1b930dfc/.system_gener
+06:29:38 start manage task
+06:29:38 done  manage task: Created At: 2026-11-18T01:29:34-05:00 Completed At: 2026-11-18T01:29:34-05:00 You have 1 background task(s) currently running: [{"taskId":"1f31c9ec-6240-4ae0-bac6-00bc1b930dfc/task-175","toolName":"ru
+06:29:44 said  Waiting for the settings test run to finish.
+06:30:16 start read file
+06:30:16 done  read file: 1901 lines, 101067 bytes
+06:30:28 start edit file
+06:30:30 done  edit file (2 s)
+06:30:49 start run command
+06:31:27 done  run command (37 s): The tool's output was truncated due to being too long. You can find the full output in a file at file:///C:/Users/haoch/.gemini/antigravity-cli/brain/1f31c9ec-6240-4ae0-bac6-00bc1b930dfc/.system_gener
+06:31:27 said  Finishing the final test check.
+06:31:56 said  I fixed the glass transparency effect so the edge panel captures the clean screen behind its resting spot once before sliding out, instead of repeatedly recapturing itself as it moves. I also stopped pop-ups near the screen edge from mistaking their own drop shadow and edge padding for live background changes, which is what caused the repeated redraws and stretched nearby text and borders into vertical stripes. When a page behind an already-open pop-up truly changes, the area directly under it still blends softly from the surrounding colours so desktop screen recorders keep working, and becaus…
+06:31:57 note  The builder's turn ended (20172723 tokens in, 170963 out)
+06:31:57 stage Checking the build…
+06:31:58 stage Checking the build (1 of 2): build…
+06:31:58 stage Checking the build (2 of 2): own-tests…
+06:31:59 done  Check build: Nothing was built: Craft Anything doesn't know how to build this kind of project.
+06:31:59 done  Check own-tests: No tests ran: Craft Anything doesn't know how to test this kind of project.
+06:31:59 stage Ready: all 2 checks pass.
+06:31:59 stage Ready: all 2 checks pass.

@@ -1,0 +1,57 @@
+{
+  "version": 5,
+  "name": "Hanami",
+  "request": "The transparency effect is drawing strange, it seems like it's drawing the background every frame",
+  "target": {
+    "kind": "none"
+  },
+  "stack": "Rust + egui (eframe)",
+  "status": "ready",
+  "note": "Ready: all 2 checks pass.",
+  "created_ms": 1794981251901,
+  "updated_ms": 1794983519007,
+  "checks": [
+    {
+      "round": 1,
+      "check": "build",
+      "passed": true,
+      "similarity": null,
+      "note": "Nothing was built: Craft Anything doesn't know how to build this kind of project.",
+      "artifacts": [],
+      "at_ms": 1794983518968
+    },
+    {
+      "round": 1,
+      "check": "own-tests",
+      "passed": true,
+      "similarity": null,
+      "note": "No tests ran: Craft Anything doesn't know how to test this kind of project.",
+      "artifacts": [],
+      "at_ms": 1794983518969
+    }
+  ],
+  "agent_session": "1f31c9ec-6240-4ae0-bac6-00bc1b930dfc",
+  "agent_session_by": "antigravity",
+  "agent_session_deep": false,
+  "capture_deep": false,
+  "allowed_actions": [],
+  "last_reply": "Running the full test suite now and waiting for it to finish.\nWaiting for the settings test run to finish.\nFinishing the final test check.\nI fixed the glass transparency effect so the edge panel captures the clean screen behind its resting spot once before sliding out, instead of repeatedly recapturing itself as it moves. I also stopped pop-ups near the screen edge from mistaking their own drop shadow and edge padding for live background changes, which is what caused the repeated redraws and stretched nearby text and borders into vertical stripes. When a page behind an already-open pop-up truly changes, the area directly under it still blends softly from the surrounding colours so desktop screen recorders keep working, and because automated checks run offscreen, the live glass look is best confirmed directly on your desktop. Next, you could ask to carry this same glass fix over to the rest of the suite apps or adjust how strongly the glass tints over busy pages.",
+  "asset_budget_usd": 5.0,
+  "generate_assets": false,
+  "app_in_root": true,
+  "start_files": [
+    ".dev",
+    ".git",
+    ".gitignore",
+    "LICENSE",
+    "README.md",
+    "THIRD-PARTY-NOTICES.md",
+    "app",
+    "build",
+    "dist",
+    "docs",
+    "launcher-dark.png",
+    "sensors",
+    "tests"
+  ]
+}
