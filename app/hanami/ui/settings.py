@@ -1,25 +1,25 @@
 """Hanami's settings: starting with Windows, the edge panel (its edge, its tab, what is pinned to
-it), the suite's appearance (light or dark, its glass, its animations), keeping quiet for games,
+it), the suite's appearance (light or dark, the glass's transparency, its animations), keeping quiet for games,
 the sound-output hotkey, updates, and about Hanami.
 
 The appearance is the whole suite's: what is chosen here is kept for every suite app
-(suitetheme.set_mode, set_look, set_motion), and each one running takes it within seconds.
+(suitetheme.set_mode, set_glass_clear, set_motion), and each one running takes it within seconds.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QKeySequence
 from PySide6.QtGui import QFontMetrics
-from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame,
+from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame,
                                QGridLayout, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit, QPushButton,
                                QSlider, QVBoxLayout, QWidget)
 
 from .. import __version__
 from ..catalog import SUITE
-from . import icons, suitesettings, suitetheme, theme
+from . import icons, suitesettings, theme
 from .suitesettings import glyph_font  # noqa: F401 - the icon font, read once in the warm-up (app.py)
 
 SOURCE = 'https://github.com/blossqt/hanami'
@@ -34,128 +34,6 @@ UPDATE_LINES = {
 
 _label, _section, _switch, _indent, _Nav = (suitesettings.label, suitesettings.section, suitesettings.switch,
                                             suitesettings.indent, suitesettings.Nav)
-
-
-class _LookTile(QAbstractButton):
-    """One of the suite's looks, as a picture of it - a pane of its glass over bright shapes and
-    lines of text - with its name below; the chosen one ringed in pink."""
-
-    def __init__(self, look: str, title: str):
-        super().__init__()
-        self.look = look
-        self.title = title
-        self.setCheckable(True)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumSize(232, 174)
-        self._picture = None
-        self._picture_key = None
-
-    def sizeHint(self) -> QSize:
-        return QSize(250, 180)
-
-    def _scene(self, width: int, height: int, dpr: float) -> QPixmap:
-        """What is behind the pane: bright shapes and lines of text, with room around."""
-        pixmap = QPixmap(round(width * dpr), round(height * dpr))
-        pixmap.setDevicePixelRatio(dpr)
-        p = QPainter(pixmap)
-        p.setRenderHint(QPainter.Antialiasing)
-        sky = QLinearGradient(0, 0, width, height)
-        sky.setColorAt(0, QColor('#ffd6e3'))
-        sky.setColorAt(0.5, QColor('#7cb6f0'))
-        sky.setColorAt(1, QColor('#2f5fc4'))
-        p.fillRect(QRectF(0, 0, width, height), sky)
-        p.setPen(Qt.NoPen)
-        for x, y, r, color in ((0.2, 0.75, 0.32, '#4fd1b5'), (0.78, 0.25, 0.26, '#ffb3c7'), (0.55, 0.62, 0.16, '#fff3a6')):
-            p.setBrush(QColor(color))
-            p.drawEllipse(QPointF(width * x, height * y), height * r, height * r)
-        p.setBrush(QColor(20, 30, 60, 170))
-        for i in range(6):
-            y = 14 + i * height / 6.2
-            p.drawRoundedRect(QRectF(12, y, width * (0.5 + 0.35 * ((i * 37) % 10) / 10), 5), 2.5, 2.5)
-        p.end()
-        return pixmap
-
-    def _render(self, rect: QRectF) -> QPixmap:
-        dpr = self.devicePixelRatioF()
-        width, height = round(rect.width()), round(rect.height())
-        margin = suitetheme._MARGIN
-        scene = self._scene(width + 2 * margin, height + 2 * margin, dpr)
-        picture = QPixmap(round(width * dpr), round(height * dpr))
-        picture.setDevicePixelRatio(dpr)
-        picture.fill(Qt.transparent)
-        p = QPainter(picture)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setRenderHint(QPainter.SmoothPixmapTransform)
-        frame = QPainterPath()
-        frame.addRoundedRect(QRectF(0, 0, width, height), 12, 12)
-        p.setClipPath(frame)
-        p.drawPixmap(QRectF(0, 0, width, height), scene,
-                     QRectF(margin * dpr, margin * dpr, width * dpr, height * dpr))
-        pane = QRectF(width * 0.17, height * 0.2, width * 0.66, height * 0.6)
-        spec = dict(suitetheme._LENSES[self.look])
-        shot = suitetheme._soften(scene, spec['blur'])
-        lens = suitetheme._lens(shot, margin + pane.x(), margin + pane.y(), round(pane.width()), round(pane.height()), spec)
-        radius = theme.LIQUID_RADIUS if self.look == 'liquid' else 10
-        shape = QPainterPath()
-        shape.addRoundedRect(pane, radius, radius)
-        p.setClipPath(shape)
-        p.drawPixmap(QRectF(pane.topLeft(), QPointF(pane.x() + pane.width(), pane.y() + pane.height())), lens,
-                     QRectF(lens.rect()))
-        p.setClipping(False)
-        dark = theme.is_dark()
-        if self.look == 'liquid':
-            tint = QLinearGradient(pane.topLeft(), pane.bottomLeft())
-            alpha = suitetheme._clear_scaled(70 if dark else 60)       # as transparent as chosen
-            tint.setColorAt(0, QColor(62, 58, 70, alpha) if dark else QColor(255, 255, 255, alpha))
-            tint.setColorAt(1, QColor(12, 10, 16, alpha) if dark else QColor(178, 178, 184, alpha))
-            p.fillPath(shape, tint)
-        else:
-            p.fillPath(shape, QColor(18, 16, 24, 118) if dark else QColor(255, 255, 255, 128))
-        suitetheme._edge_light(p, pane, radius, 120, 230, 1.2)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(255, 255, 255, 230) if dark else QColor(30, 30, 40, 200))
-        p.drawRoundedRect(QRectF(pane.x() + 14, pane.y() + 14, pane.width() * 0.45, 6), 3, 3)
-        p.setBrush(QColor(255, 255, 255, 140) if dark else QColor(30, 30, 40, 110))
-        p.drawRoundedRect(QRectF(pane.x() + 14, pane.y() + 26, pane.width() * 0.62, 4), 2, 2)
-        p.setBrush(QColor(theme.ACCENT))
-        p.drawRoundedRect(QRectF(pane.x() + 14, pane.bottom() - 26, 44, 14), 7 if self.look == 'liquid' else 4,
-                          7 if self.look == 'liquid' else 4)
-        p.end()
-        return picture
-
-    def paintEvent(self, event):
-        c = theme.colors()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        r = QRectF(self.rect()).adjusted(3, 3, -3, -3)
-        preview = QRectF(r.x(), r.y(), r.width(), r.height() - 28)
-        key = (round(preview.width()), round(preview.height()), self.devicePixelRatioF(), theme.is_dark(),
-               theme.liquid_clear() if self.look == 'liquid' else None)
-        if key != self._picture_key:
-            self._picture = self._render(preview)
-            self._picture_key = key
-        if not self.isEnabled():
-            p.setOpacity(0.5)
-        p.drawPixmap(preview.topLeft(), self._picture)
-        if self.isChecked() or self.underMouse():
-            p.setPen(QPen(QColor(theme.ink()), 2.2 if self.isChecked() else 1.2))
-            p.setBrush(Qt.NoBrush)
-            p.drawRoundedRect(preview.adjusted(-1.5, -1.5, 1.5, 1.5), 13.5, 13.5)
-        if self.isChecked():
-            badge = QRectF(preview.right() - 28, preview.top() + 8, 20, 20)
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(theme.ACCENT))
-            p.drawEllipse(badge)
-            p.setPen(QPen(QColor(theme.ON_ACCENT), 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-            tick = QPainterPath(QPointF(badge.x() + 5.5, badge.y() + 10.5))
-            tick.lineTo(badge.x() + 8.8, badge.y() + 13.6)
-            tick.lineTo(badge.x() + 14.6, badge.y() + 7)
-            p.setBrush(Qt.NoBrush)
-            p.drawPath(tick)
-        p.setPen(c.text)
-        p.setFont(theme.text('strong', QFont.DemiBold))
-        p.drawText(QRectF(r.x() + 2, preview.bottom() + 6, r.width(), 20), Qt.AlignLeft | Qt.AlignVCenter, self.title)
-        p.end()
 
 
 class SettingsWindow(QWidget):
@@ -415,31 +293,17 @@ class SettingsWindow(QWidget):
         layout.addWidget(frame)
 
         frame, box = _section('Glass')
-        tiles = QHBoxLayout()
-        tiles.setSpacing(16)
-        self.looks = QButtonGroup(self)
-        self.look_tiles: dict[str, _LookTile] = {}
-        for name, title in theme.LOOKS.items():
-            tile = _LookTile(name, title)
-            tile.setChecked(theme.look() == name)
-            tile.setEnabled(theme.glass_on())
-            tile.clicked.connect(lambda _, n=name: theme.set_look(n))
-            self.looks.addButton(tile)
-            self.look_tiles[name] = tile
-            tiles.addWidget(tile)
-        tiles.addStretch(1)
-        box.addLayout(tiles)
         row = QHBoxLayout()
         row.setSpacing(12)
         self.clear_slider = QSlider(Qt.Horizontal)
         self.clear_slider.setRange(0, 100)
-        self.clear_slider.setValue(theme.liquid_clear())
+        self.clear_slider.setValue(theme.glass_clear())
         self.clear_slider.setCursor(Qt.PointingHandCursor)
-        self.clear_slider.setAccessibleName('Liquid glass transparency')
-        self.clear_shown = _label(f'{theme.liquid_clear()}%', role='dim')
+        self.clear_slider.setAccessibleName('Glass transparency')
+        self.clear_shown = _label(f'{theme.glass_clear()}%', role='dim')
         self.clear_shown.setMinimumWidth(48)
         self.clear_slider.valueChanged.connect(self._clear_edited)
-        row.addWidget(_label('Liquid glass transparency'))
+        row.addWidget(_label('Transparency'))
         row.addWidget(self.clear_slider, 1)
         row.addWidget(self.clear_shown)
         box.addLayout(row)
@@ -903,14 +767,11 @@ class SettingsWindow(QWidget):
 
     def _clear_edited(self, value: int) -> None:
         self.clear_shown.setText(f'{value}%')
-        theme.set_liquid_clear(value)
-        self.look_tiles['liquid'].update()
+        theme.set_glass_clear(value)
 
     def _show_clear_enabled(self) -> None:
-        """The transparency slider works only on liquid glass."""
-        on = theme.glass_on() and theme.look() == 'liquid'
-        self.clear_slider.setEnabled(on)
-        self.clear_slider.setToolTip('' if on else 'Applies to Liquid glass.')
+        """The transparency slider works only where there is glass."""
+        self.clear_slider.setEnabled(theme.glass_on())
 
     def _appearance_changed(self) -> None:
         """The look, light or dark, or the animations changed (here, or in another copy): the
@@ -918,14 +779,11 @@ class SettingsWindow(QWidget):
         try:
             for name, button in self.mode_buttons.items():
                 button.setChecked(theme.mode() == name)
-            for name, tile in self.look_tiles.items():
-                tile.setChecked(theme.look() == name)
-                tile.update()
             self._show_clear_enabled()
-            if self.clear_slider.value() != theme.liquid_clear() and not self.clear_slider.isSliderDown():
+            if self.clear_slider.value() != theme.glass_clear() and not self.clear_slider.isSliderDown():
                 self.clear_slider.blockSignals(True)
-                self.clear_slider.setValue(theme.liquid_clear())
-                self.clear_shown.setText(f'{theme.liquid_clear()}%')
+                self.clear_slider.setValue(theme.glass_clear())
+                self.clear_shown.setText(f'{theme.glass_clear()}%')
                 self.clear_slider.blockSignals(False)
             if self.motion.isChecked() != theme.motion_chosen():
                 self.motion.blockSignals(True)

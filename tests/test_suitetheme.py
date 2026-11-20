@@ -35,37 +35,28 @@ suitetheme.game_in_front = lambda: False
 
 
 class LookTests(unittest.TestCase):
+    """One look: frosted. Liquid glass was removed on 2026-11-20; a PC that chose it before (its
+    Look still 'liquid' in the registry) is frosted all the same."""
+
     def setUp(self):
         self._key = suitetheme._LOOK_KEY
         suitetheme._LOOK_KEY = TEST_KEY
-        suitetheme._look = None
 
     def tearDown(self):
         suitetheme._LOOK_KEY = self._key
-        suitetheme._look = None
         os.environ.pop('SUITE_LOOK', None)
         try:
             winreg.DeleteKey(winreg.HKEY_CURRENT_USER, TEST_KEY)
         except OSError:
             pass
 
-    def test_frosted_until_chosen(self):
-        self.assertEqual(suitetheme.look(), 'frosted')
-        suitetheme.set_look('liquid')
-        self.assertEqual(suitetheme.look(), 'liquid')
-        suitetheme.set_look('nonsense')
-        self.assertEqual(suitetheme.look(), 'frosted', 'an unknown look is the default one')
-
-    def test_another_app_choosing_is_picked_up(self):
-        self.assertEqual(suitetheme.look(), 'frosted')
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, TEST_KEY) as key:      # as Hanami, elsewhere
+    def test_frosted_whatever_was_chosen_before(self):
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, TEST_KEY) as key:
             winreg.SetValueEx(key, 'Look', 0, winreg.REG_SZ, 'liquid')
-        suitetheme._look_changed()                                              # what the 2 s timer does
-        self.assertEqual(suitetheme.look(), 'liquid')
-
-    def test_override_for_screenshots(self):
         os.environ['SUITE_LOOK'] = 'liquid'
-        self.assertEqual(suitetheme._read_look(), 'liquid')
+        suitetheme._look_changed()
+        self.assertEqual(suitetheme.look(), 'frosted')
+        self.assertEqual(list(suitetheme.LOOKS), ['frosted'])
 
 
 class GlassOffscreenTests(unittest.TestCase):
@@ -149,9 +140,9 @@ class ChoicesTests(unittest.TestCase):
         window.close()
 
 
-class LiquidClearTests(unittest.TestCase):
-    """How see-through the liquid glass is: chosen in Hanami (0 to 100), its tint thinned or
-    thickened to match."""
+class GlassClearTests(unittest.TestCase):
+    """How see-through the glass is: chosen in Hanami (0 to 100), its tint thinned or thickened to
+    match."""
 
     def setUp(self):
         self._key = suitetheme._LOOK_KEY
@@ -167,158 +158,42 @@ class LiquidClearTests(unittest.TestCase):
             pass
 
     def test_unset_it_is_as_the_glass_always_was(self):
-        self.assertEqual(suitetheme.liquid_clear(), suitetheme.CLEAR_DEFAULT)
+        self.assertEqual(suitetheme.glass_clear(), suitetheme.CLEAR_DEFAULT)
         self.assertEqual(suitetheme._clear_scaled(100), 100)
+        self.assertEqual(suitetheme.veil().alpha(), 112 if suitetheme.is_dark() else 64)
 
     def test_clearer_thins_the_tint_and_less_clear_thickens_it(self):
-        suitetheme.set_liquid_clear(100)
+        suitetheme.set_glass_clear(100)
         self.assertEqual(suitetheme._clear_scaled(160), 0, 'fully clear: no tint')
-        suitetheme.set_liquid_clear(75)
+        self.assertEqual(suitetheme.veil().alpha(), 0, "a window's veil too")
+        suitetheme.set_glass_clear(75)
         self.assertEqual(suitetheme._clear_scaled(160), 80)
-        suitetheme.set_liquid_clear(0)
+        suitetheme.set_glass_clear(0)
         self.assertEqual(suitetheme._clear_scaled(160), 255, 'twice as thick, as far as it goes')
-        suitetheme.set_liquid_clear(250)
-        self.assertEqual(suitetheme.liquid_clear(), 100, 'kept within 0 to 100')
+        suitetheme.set_glass_clear(250)
+        self.assertEqual(suitetheme.glass_clear(), 100, 'kept within 0 to 100')
 
     def test_text_behind_still_tints_it_however_clear(self):
-        """At 85% the user saw the text of the window behind Hanami's read as clearly as its own: what
-        text behind adds to the tint stays, mostly, however clear the glass is chosen."""
-        suitetheme.set_liquid_clear(50)
+        """At 85% the user once saw the text behind a window read as clearly as the window's own:
+        what text behind adds to the tint stays, mostly, however clear the glass is chosen."""
+        suitetheme.set_glass_clear(50)
         self.assertEqual(suitetheme._clear_scaled(40, 150, 235), 190, 'as it has always been')
-        suitetheme.set_liquid_clear(85)
+        suitetheme.set_glass_clear(85)
         self.assertEqual(suitetheme._clear_scaled(40, 0, 235), 12, 'calm behind: clear')
         self.assertGreaterEqual(suitetheme._clear_scaled(40, 150, 235), 130, 'text behind: still tinted')
-        suitetheme.set_liquid_clear(100)
-        self.assertEqual(suitetheme._clear_scaled(40, 150, 235), 120)
 
     def test_another_app_takes_it_within_seconds(self):
-        suitetheme.liquid_clear()
+        suitetheme.glass_clear()
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, TEST_KEY) as key:      # as Hanami, elsewhere
-            winreg.SetValueEx(key, 'LiquidClear', 0, winreg.REG_DWORD, 30)
+            winreg.SetValueEx(key, 'GlassClear', 0, winreg.REG_DWORD, 30)
         called = []
         suitetheme.on_restyle(lambda: called.append(True))
         suitetheme._look_changed()
-        self.assertEqual(suitetheme.liquid_clear(), 30)
+        self.assertEqual(suitetheme.glass_clear(), 30)
         self.assertTrue(called)
 
 
-class GlassLibraryTests(unittest.TestCase):
-    """The liquid glass drawn pixel by pixel, by glasslens.dll."""
-
-    def test_the_library_is_there_and_loads(self):
-        self.assertTrue(os.path.isfile(suitetheme.GLASS_LENS_FILE), 'build it with build\\build_glasslens.ps1')
-        self.assertIsNotNone(suitetheme._lens_library())
-
-    def test_the_middle_bends_too(self):
-        """The face is domed: what is behind is drawn in towards the middle, so a stripe a little
-        way from the middle shows nearer it than it really is."""
-        m = suitetheme._MARGIN
-        shot = QPixmap(240 + 2 * m, 160 + 2 * m)
-        painter = QPainter(shot)
-        for x in range(shot.width()):                   # a ramp: how far along, as how red
-            painter.fillRect(x, 0, 1, shot.height(), QColor(min(255, x), 0, 0))
-        painter.end()
-        spec = dict(suitetheme._LENSES['liquid'], spread=0.0)
-        lens = suitetheme._lens(shot, m, m, 240, 160, spec).toImage()
-        middle = lens.pixelColor(120, 80).red()
-        self.assertLessEqual(abs(middle - (m + 120)), 1, 'the very middle: as it is')
-        self.assertGreater(lens.pixelColor(80, 80).red(), m + 80 + 2, 'left of it: from nearer the middle')
-        self.assertLess(lens.pixelColor(160, 80).red(), m + 160 - 2, 'right of it: from nearer the middle')
-
-    def test_outside_the_rounded_corners_it_is_clear(self):
-        m = suitetheme._MARGIN
-        shot = QPixmap(200 + 2 * m, 120 + 2 * m)
-        shot.fill(QColor('#00ff00'))
-        lens = suitetheme._lens(shot, m, m, 200, 120, suitetheme._LENSES['liquid']).toImage()
-        self.assertEqual(lens.pixelColor(0, 0).alpha(), 0)
-        self.assertEqual(lens.pixelColor(100, 60).alpha(), 255)
-
-    def test_a_pop_ups_glass_takes_about_a_millisecond(self):
-        m = suitetheme._MARGIN_FRAMELESS
-        shot = QPixmap(440 + 2 * m, 300 + 2 * m)
-        shot.fill(QColor('#808080'))
-        runs = []
-        for _ in range(9):
-            start = time.perf_counter()
-            suitetheme._lens(shot, m, m, 440, 300, suitetheme._LENSES['liquid'])
-            runs.append(time.perf_counter() - start)
-        self.assertLess(sorted(runs)[4], 0.006, f'{sorted(runs)[4] * 1000:.1f} ms')
-
-
-class LiveGlassTests(unittest.TestCase):
-    """A framed liquid window's live glass (glasslive.c): DWM thumbnails of what is behind, bent.
-    What it looks like is judged on screen (Keytap\\.dev\\liquid\\live_app.py); here, that it is
-    there and stays out of the way where it cannot work."""
-
-    def test_the_library_has_it(self):
-        lens = suitetheme._live_library()
-        self.assertIsNotNone(lens)
-        self.assertEqual(set(lens), {'open', 'update', 'close'})
-
-    def test_a_window_gone_is_not_worked_on(self):
-        lens = suitetheme._live_library()
-        state = lens['open'](0, 0)
-        self.assertEqual(lens['update'](state, 36, 48, 1.06), -1)
-        lens['close'](state)
-
-    def test_none_offscreen_or_frosted(self):
-        window = QWidget()
-        suitetheme.frost(window)
-        window.show()
-        app.processEvents()
-        self.assertFalse(suitetheme._live_on(window), 'offscreen: no live glass, and no helper window')
-        window.close()
-
-
-class LensWithoutTheLibraryTests(unittest.TestCase):
-    """Without glasslens.dll (an app built without it), the bevel is drawn with Qt."""
-
-    def setUp(self):
-        suitetheme._glass_lens = False
-
-    def tearDown(self):
-        suitetheme._glass_lens = None
-
-    def test_the_bevel_still_bends_and_colours_still_part(self):
-        tests = LensTests()
-        tests.test_the_middle_is_clear_and_the_rim_bends_in_what_is_beyond()
-        tests.test_the_bend_is_one_smooth_curve()
-        tests.test_colours_part_along_the_rim()
-        tests.test_a_slim_pop_up_keeps_a_flat_middle()
-        tests.test_a_framed_windows_rim_leaves_its_middle_out()
-
-
-class LiquidTests(unittest.TestCase):
-    """The liquid look's parts that don't need a real window: glass is pretended on."""
-
-    def setUp(self):
-        suitetheme._glass, suitetheme._look = True, 'liquid'
-
-    def tearDown(self):
-        suitetheme._glass, suitetheme._look = None, None
-
-    def test_switches_capsules_and_glass_panels(self):
-        style = suitetheme.SuiteStyle()
-        self.assertEqual(style.pixelMetric(QStyle.PM_IndicatorWidth), suitetheme.SuiteStyle.SWITCH[0])
-        self.assertIn('qlineargradient', suitetheme.panel_css('QFrame#card'))
-        self.assertTrue(suitetheme.liquid_controls_css())
-        button = QPushButton('Open')
-        button.resize(80, 30)
-        suitetheme._round(button)
-        self.assertEqual(button.styleSheet(), 'border-radius: 15px;', 'a capsule, half as round as it is tall')
-        suitetheme._look = 'frosted'
-        suitetheme._round(button)
-        self.assertEqual(button.styleSheet(), '', 'and plain again in the other look')
-        self.assertEqual(style.pixelMetric(QStyle.PM_IndicatorWidth), suitetheme.SuiteStyle.SIZE)
-        self.assertEqual(suitetheme.liquid_controls_css(), '')
-
-    def test_an_apps_own_button_style_is_left_alone(self):
-        button = QPushButton('Go')
-        button.setStyleSheet('QPushButton { background: pink; }')
-        button.resize(80, 30)
-        suitetheme._round(button)
-        self.assertEqual(button.styleSheet(), 'QPushButton { background: pink; }')
-
+class LightTests(unittest.TestCase):
     def test_parts_qt_made_itself_get_no_light(self):
         box = QLineEdit()
         box.setClearButtonEnabled(True)
@@ -328,14 +203,6 @@ class LiquidTests(unittest.TestCase):
         button = QPushButton('Mine')
         suitetheme._light(button)
         self.assertTrue(button._suite_lit)
-
-    def test_style_sheets_follow_the_look(self):
-        window = QWidget()
-        suitetheme.restyle(window, suitetheme.card_style)
-        self.assertIn('border-radius: 13px', window.styleSheet())
-        suitetheme._look = 'frosted'
-        suitetheme._suite_changed()
-        self.assertNotIn('border-radius: 13px', window.styleSheet())
 
 
 class LensTests(unittest.TestCase):
@@ -351,56 +218,13 @@ class LensTests(unittest.TestCase):
         painter.end()
         return pixmap
 
-    def test_the_middle_is_clear_and_the_rim_bends_in_what_is_beyond(self):
+    def test_a_pop_ups_glass_is_what_is_behind_it(self):
         m = suitetheme._MARGIN
         shot = self.shot(200 + 2 * m, 120 + 2 * m)
-        lens = suitetheme._lens(shot, m, m, 200, 120, suitetheme._LENSES['liquid']).toImage()
-        self.assertEqual(lens.pixelColor(100, 60).name(), '#00ff00', 'the middle: what is behind, as it is')
-        self.assertGreater(lens.pixelColor(0, 60).red(), 200, 'the rim: light from beyond the left edge')
-        self.assertGreater(lens.pixelColor(8, 60).red(), 200,
-                           'the bend reaches well in, where it shows: until 2026-11-20 it was gone 4 px in')
-        self.assertEqual(lens.pixelColor(40, 60).name(), '#00ff00', 'past the bevel, the glass is flat')
-
-    def test_the_bend_is_one_smooth_curve(self):
-        """Across the bevel, what each pixel shows comes from steadily further in: no line of it
-        shows something its neighbour nearer the rim has already passed."""
-        m = suitetheme._MARGIN
-        shot = QPixmap(200 + 2 * m, 120 + 2 * m)
-        painter = QPainter(shot)
-        for x in range(shot.width()):                   # a ramp: how far along, as how red
-            painter.fillRect(x, 0, 1, shot.height(), QColor(min(255, x), 0, 0))
-        painter.end()
-        spec = dict(suitetheme._LENSES['liquid'], spread=0.0)
-        lens = suitetheme._lens(shot, m, m, 200, 120, spec).toImage()
-        reds = [lens.pixelColor(x, 60).red() for x in range(40)]
-        self.assertEqual(reds, sorted(reds), reds)
-        self.assertLess(reds[0], m - 20, 'the rim shows what lies well beyond the edge')
-
-    def test_colours_part_along_the_rim(self):
-        m = suitetheme._MARGIN
-        shot = QPixmap(200 + 2 * m, 120 + 2 * m)
-        shot.fill(QColor('#ffffff'))
-        painter = QPainter(shot)
-        painter.fillRect(m - 40, 0, 12, shot.height(), QColor('#000000'))   # a dark line beyond the left edge
-        painter.end()
-        lens = suitetheme._lens(shot, m, m, 200, 120, suitetheme._LENSES['liquid']).toImage()
-        parted = max(abs(lens.pixelColor(x, 60).red() - lens.pixelColor(x, 60).blue()) for x in range(36))
-        self.assertGreater(parted, 60, 'red and blue bend apart, so the line shows a coloured fringe')
-        self.assertEqual(lens.pixelColor(100, 60).name(), '#ffffff', 'the middle keeps its colours together')
-
-    def test_a_slim_pop_up_keeps_a_flat_middle(self):
-        m = suitetheme._MARGIN
-        shot = self.shot(240 + 2 * m, 40 + 2 * m)
-        lens = suitetheme._lens(shot, m, m, 240, 40, suitetheme._LENSES['liquid']).toImage()
-        self.assertEqual(lens.pixelColor(120, 20).name(), '#00ff00')
-        self.assertGreater(lens.pixelColor(0, 20).red(), 200)
-
-    def test_a_framed_windows_rim_leaves_its_middle_out(self):
-        m = suitetheme._MARGIN
-        shot = self.shot(200 + 2 * m, 120 + 2 * m)
-        lens = suitetheme._lens(shot, m, m, 200, 120, suitetheme._LENSES['rim'], rim_only=True).toImage()
-        self.assertEqual(lens.pixelColor(100, 60).alpha(), 0, 'what is behind shows through, live')
-        self.assertGreater(lens.pixelColor(0, 60).alpha(), 0)
+        lens = suitetheme._lens(shot, m, m, 200, 120).toImage()
+        self.assertEqual(lens.size(), QSize(200, 120))
+        self.assertEqual(lens.pixelColor(100, 60).name(), '#00ff00')
+        self.assertEqual(lens.pixelColor(0, 60).name(), '#00ff00', 'nothing beyond its edge is bent in')
 
     def test_tone_tells_bright_from_dark_and_calm_from_busy(self):
         calm = QPixmap(64, 64)
@@ -551,21 +375,7 @@ class LensTests(unittest.TestCase):
 
 
 class RimTests(unittest.TestCase):
-    """A dragged window repaints only its rim, and its rim's light is drawn once and kept."""
-
-    def test_only_the_rim_repaints(self):
-        window = QWidget()
-        window.resize(300, 200)
-        changed = []
-        window.update = changed.append
-        suitetheme._update_rim(window)
-        region = changed[0]
-        span = suitetheme._RIM_SPAN
-        self.assertTrue(region.contains(QPoint(2, 100)) and region.contains(QPoint(297, 100)))
-        self.assertTrue(region.contains(QPoint(150, 197)), 'and along the bottom')
-        self.assertFalse(region.contains(QPoint(150, 100)), 'not the middle')
-        self.assertFalse(region.contains(QPoint(150, 2)), 'nor the top, under the title bar')
-        self.assertFalse(region.contains(QPoint(span + 1, 100)))
+    """A framed window opens over glass of its own until Windows has its Acrylic up."""
 
     def test_a_frosted_window_opens_over_glass_of_its_own_until_windows_has_its_acrylic_up(self):
         window = QWidget()
@@ -598,56 +408,12 @@ class RimTests(unittest.TestCase):
         middle = glass.pixelColor(100, 60)
         self.assertGreater(middle.red(), middle.blue(), 'what is behind the window, not beside it')
 
-    def test_a_framed_windows_rim_bends_in_what_is_beyond_it_in_either_look(self):
+    def test_a_framed_window_takes_what_is_behind_it_as_it_opens(self):
         window = QWidget()
         suitetheme.frost(window)
         with mock.patch.object(suitetheme, 'glass_on', lambda: True):
-            for name in suitetheme.LOOKS:
-                with mock.patch.object(suitetheme, 'look', lambda: name):
-                    self.assertTrue(suitetheme._screen_glass(window), name)
+            self.assertTrue(suitetheme._screen_glass(window), 'for the glass it opens over')
         self.assertFalse(suitetheme._screen_glass(window), 'no glass, nothing taken from the screen')
-
-    def test_the_rims_light_is_kept_until_it_moves(self):
-        window = QWidget()
-        window.resize(300, 200)
-        edge = QRectF(0.5, 0.5, 299, 199)
-        first = suitetheme._rim_light(window, edge, 8, 120, (80, 245))
-        self.assertIs(suitetheme._rim_light(window, edge, 8, 120, (80, 245)), first)
-        self.assertIsNot(suitetheme._rim_light(window, edge, 8, 121, (80, 245)), first, 'the light moved')
-        image = suitetheme._rim_light(window, edge, 8, 121, (80, 245)).toImage()
-        self.assertGreater(image.pixelColor(150, 0).alpha(), 100, 'bright at the edge')
-        self.assertGreater(image.pixelColor(150, 0).alpha(), image.pixelColor(150, 5).alpha(), 'fading inwards')
-        self.assertEqual(image.pixelColor(150, 100).alpha(), 0, 'nothing in the middle')
-
-    def test_the_rims_light_stretched_from_its_piece_is_the_light_drawn_whole(self):
-        for width, height, top in ((300, 200, 0.5), (411, 287, 0.5 - suitetheme._ABOVE)):
-            window = QWidget()
-            window.resize(width, height)
-            edge = QRectF(0.5, top, width - 1, height - 0.5 - top)
-            whole = QPixmap(width, height)
-            whole.fill(Qt.transparent)
-            p = QPainter(whole)
-            p.setRenderHint(QPainter.Antialiasing)
-            suitetheme._rim_glow(p, edge, 8, 120, 80)
-            suitetheme._edge_light(p, edge, 8, 120, 245, 1.3)
-            p.end()
-            stretched = QPixmap(width, height)
-            stretched.fill(Qt.transparent)
-            p = QPainter(stretched)
-            suitetheme._draw_rim_light(p, window, edge, 8, 120, (80, 245))
-            p.end()
-            self.assertEqual(stretched.toImage(), whole.toImage(), (width, height))
-
-    def test_a_dragged_windows_rim_is_drawn_again_at_most_every_few_ms(self):
-        window = QWidget()
-        drawn = []
-        with mock.patch.object(suitetheme, '_update_rim', lambda w: drawn.append(time.perf_counter())):
-            for _ in range(20):                 # a drag: many moves at once
-                suitetheme._rim_soon(window)
-            self.assertEqual(len(drawn), 1, 'the first at once, the rest held')
-            _wait(suitetheme._RIM_EVERY * 3)
-            self.assertEqual(len(drawn), 2, 'and the last one drawn once the wait is over')
-            self.assertGreaterEqual((drawn[1] - drawn[0]) * 1000, suitetheme._RIM_EVERY - 1)
 
 
 class SmoothResizeTests(unittest.TestCase):
@@ -862,7 +628,7 @@ class MotionTests(unittest.TestCase):
     def test_a_button_brightens_under_the_pointer_in_frosted(self):
         from PySide6.QtCore import QEvent, QPointF
         from PySide6.QtGui import QEnterEvent
-        with mock.patch.object(suitetheme, '_liquid_look', lambda: False),                 mock.patch.object(suitetheme, 'motion_on', lambda: True):
+        with mock.patch.object(suitetheme, 'motion_on', lambda: True):
             window = QWidget()
             button = QPushButton('Open', window)
             button.resize(100, 32)

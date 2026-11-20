@@ -63,14 +63,8 @@ class SoundToggle(QWidget):
         slide = QVariantAnimation(self)
         slide.setStartValue(self._at)
         slide.setEndValue(target)
-        if theme.look() == 'liquid':
-            spring = QEasingCurve(QEasingCurve.OutBack)
-            spring.setOvershoot(1.2)
-            slide.setDuration(theme.GENTLE)
-            slide.setEasingCurve(spring)
-        else:
-            slide.setDuration(theme.STEADY)
-            slide.setEasingCurve(QEasingCurve.OutCubic)
+        slide.setDuration(theme.STEADY)
+        slide.setEasingCurve(QEasingCurve.OutCubic)
         slide.valueChanged.connect(lambda v: (setattr(self, '_at', float(v)), self.update()))
         self._moving = slide
         theme.animate(slide)
@@ -102,7 +96,7 @@ class SoundToggle(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        bend = r.height() / 2 if theme.look() == 'liquid' and theme.glass_on() else 9
+        bend = 9
         track = QPainterPath()
         track.addRoundedRect(r, bend, bend)
         painter.fillPath(track, c.chip)
@@ -178,7 +172,7 @@ class MicButton(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        bend = r.height() / 2 if theme.look() == 'liquid' and theme.glass_on() else 9
+        bend = 9
         shape = QPainterPath()
         shape.addRoundedRect(r, bend, bend)
         red = QColor(MUTED_DARK if theme.is_dark() else MUTED)
