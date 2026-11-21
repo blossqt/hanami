@@ -657,6 +657,80 @@ class CheckOneAppTests(_Controlled):
         _, _, line, _ = self.check('Grabbit', 'No connection to GitHub.', Path(sys.executable))
         self.assertIn('No connection to GitHub.', line)
 
+    def built_here(self, name, exe, found):
+        """Check an app whose copy is its own build at exe (Hanami didn't install it)."""
+        import dataclasses
+        from unittest import mock
+        from hanami import catalog, releases
+        from hanami.ui.launcher import LauncherWindow
+        entry = dataclasses.replace(catalog.BY_NAME[name], dev_build=exe)
+        self.controller.window = LauncherWindow()
+        self.controller.window.check_app.connect(self.controller.check_app)
+        card = self.controller.window.cards[name]
+        try:
+            with mock.patch.dict(catalog.BY_NAME, {name: entry}), \
+                    mock.patch.object(releases, 'latest', lambda app, timeout=15: found), \
+                    mock.patch.object(hanami.Settings, 'exe', lambda s, n: exe if n == name else None), \
+                    mock.patch.object(hanami.Settings, 'installed', lambda s, n: None):
+                card.check_clicked.emit(name)
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline and name in self.controller._checking_apps:
+                    qt.processEvents()
+                    time.sleep(0.01)
+                qt.processEvents()
+                return card.state.text(), card.update_button.isVisibleTo(card), self.controller.update_available(name)
+        finally:
+            self.controller.window.close()
+
+    def test_grabbit_built_here_and_behind_is_offered_its_update(self):
+        """Until 2026-11-21 an app with its own updater was never offered one here, and its check
+        said "Up to date" whatever its version."""
+        exe = Path(sys.executable)          # a real exe with a version stamped in it (Python's: 3.12)
+        line, button, offered = self.built_here('Grabbit', exe, self.release('Grabbit', '99.0.0'))
+        self.assertIn('Version 99.0.0 available', line)
+        self.assertTrue(button and offered)
+
+    def unstamped(self, data: bytes):
+        exe = WORK / 'unstamped' / 'HomeworkHub.exe'
+        exe.parent.mkdir(parents=True, exist_ok=True)
+        exe.write_bytes(data)
+        return exe
+
+    def test_homework_hub_with_no_version_stamped_is_told_by_its_hash(self):
+        import hashlib
+        from hanami import releases
+        data = b'not really an exe, and no version in it'
+        exe = self.unstamped(data)
+        asset = releases.Asset('HomeworkHub.exe', len(data), hashlib.sha256(data).hexdigest(), 'https://example.invalid/h')
+        line, button, offered = self.built_here('Homework Hub', exe, releases.Release('HomeworkHub', '1.12.17', '', '', asset))
+        self.assertIn('Up to date', line, 'byte for byte the newest release')
+        self.assertFalse(button or offered)
+
+    def test_updates_by_itself_leave_a_self_updating_copy_to_its_own_updater(self):
+        from unittest import mock
+        installed = []
+        names = [app.name for app in hanami.catalog.SUITE]
+        with mock.patch.object(hanami.Settings, 'auto_update', new_callable=mock.PropertyMock, return_value=True), \
+                mock.patch.object(hanami.Settings, 'installed', lambda s, n: None), \
+                mock.patch.object(self.controller, 'update_available', lambda name: True), \
+                mock.patch.object(self.controller, 'is_running', lambda name: False), \
+                mock.patch.object(self.controller, '_holding', lambda name: False), \
+                mock.patch.object(self.controller, 'hanami_update', lambda: None), \
+                mock.patch.object(self.controller, 'install_app', installed.append), \
+                mock.patch.object(hanami.theme, 'quiet_now', lambda: False):
+            self.controller._auto_update()
+        self.assertNotIn('Grabbit', installed)
+        self.assertNotIn('Homework Hub', installed)
+        self.assertEqual(installed, [n for n in names if n not in ('Grabbit', 'Homework Hub')])
+
+    def test_homework_hub_not_the_newest_release_is_offered_it(self):
+        from hanami import releases
+        exe = self.unstamped(b'an older build, no version in it')
+        asset = releases.Asset('HomeworkHub.exe', 1, '0' * 64, 'https://example.invalid/h')
+        line, button, offered = self.built_here('Homework Hub', exe, releases.Release('HomeworkHub', '1.12.17', '', '', asset))
+        self.assertIn('Version 1.12.17 available', line)
+        self.assertTrue(button and offered)
+
 
 class RestartTests(_Controlled):
     """An app quit for its update starts again in the tray (the user's wish, 2026-11-02); a new
@@ -1657,16 +1731,18 @@ class CopyBuiltHereTests(unittest.TestCase):
         from pathlib import Path
         from hanami import app as module, catalog
         exe = Path(r'C:\built\Keytap\Keytap.exe')
-        fake = Space(latest={'Keytap': Space(version='2.0.0', asset=object())})
+        fake = Space(latest={'Keytap': Space(version='2.0.0', asset=object())}, _not_newest=set())
         fake.settings = Space(exe=lambda name: exe, installed=lambda name: None)
         fake.version_of = lambda name, path: version
         fake.built_here = lambda name: module.Controller.built_here(fake, name)
         entry = Space(dev_build=exe, updates_itself=updates_itself)
         return module.Controller, fake, entry, catalog
 
-    def ask(self, version, updates_itself=False):
+    def ask(self, version, updates_itself=False, not_newest=False):
         from unittest.mock import patch
         controller, fake, entry, catalog = self.controller(version, updates_itself)
+        if not_newest:
+            fake._not_newest.add('Keytap')
         with patch.dict(catalog.BY_NAME, {'Keytap': entry}):
             return controller.update_available(fake, 'Keytap'), controller.built_here(fake, 'Keytap')
 
@@ -1679,9 +1755,16 @@ class CopyBuiltHereTests(unittest.TestCase):
     def test_a_build_whose_version_isnt_known_yet_is_not(self):
         self.assertEqual(self.ask('')[0], False)
 
-    def test_an_app_with_its_own_updater_is_left_to_it(self):
+    def test_one_with_no_version_stamped_that_isnt_the_newest_release_is(self):
+        """Homework Hub's exe carried no version before 1.12.18: told by its hash instead."""
+        self.assertEqual(self.ask('', not_newest=True)[0], True)
+
+    def test_an_app_with_its_own_updater_is_offered_its_updates_too(self):
+        """Until 2026-11-21 Grabbit and Homework Hub were left out: never offered, and the check
+        said they were up to date."""
         offered, home = self.ask('1.0.0', updates_itself=True)
-        self.assertEqual((offered, home), (False, None))
+        from pathlib import Path
+        self.assertEqual((offered, home), (True, Path(r'C:\built\Keytap')))
 
     def test_the_update_goes_in_the_folder_it_runs_from(self):
         from pathlib import Path

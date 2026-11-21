@@ -12,7 +12,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-_DOCUMENTS = Path.home() / 'Documents'
+# Where the apps' own builds are looked for. A test points it at an empty folder (HANAMI_DOCUMENTS):
+# a build found there is updated in its own folder, and a test must never reach this PC's real ones.
+_DOCUMENTS = Path(os.environ.get('HANAMI_DOCUMENTS') or Path.home() / 'Documents')
 
 
 @dataclass(frozen=True)

@@ -357,9 +357,13 @@ class ControllerTest(unittest.TestCase):
         from PySide6.QtCore import QCoreApplication
         QCoreApplication.instance() or QCoreApplication([])
         publish('blossqt/homework-hub-releases', 'HomeworkHub', '1.0.0', 'HomeworkHub.exe', b'MZ hub one')
+        # No builds of the apps where it looks (HANAMI_DOCUMENTS): since 2026-11-21 a build of Homework
+        # Hub found there is updated in its own folder, and this PC's real one must never be.
+        documents = WORK / 'Documents'
+        documents.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ, HANAMI_DEV='1', HANAMI_INSTANCE='hanami-install-test',
                    HANAMI_PIPE='hanami-tray-install-test', QT_QPA_PLATFORM='offscreen',
-                   HANAMI_SETTINGS=str(WORK / 'hanami.ini'))
+                   HANAMI_SETTINGS=str(WORK / 'hanami.ini'), HANAMI_DOCUMENTS=str(documents))
         hanami = subprocess.Popen([sys.executable, str(ROOT / 'app' / 'main.py')], env=env,
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         exe = WORK / 'Programs' / 'Homework Hub' / 'HomeworkHub.exe'

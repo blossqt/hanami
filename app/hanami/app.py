@@ -17,6 +17,7 @@ finish_update - once this one has quit, and starts in its place).
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import json
 import os
 import queue
@@ -431,6 +432,7 @@ class Controller(QObject):
         self._bridge.sensors_known.connect(self._sensors_known)
         self._bridge.leftovers_cleared.connect(self._leftovers_cleared)
         self._reading: set[tuple] = set()           # exes whose versions are being read
+        self._not_newest: set[str] = set()          # apps with no version stamp, known not to be the newest release
         self._sensors_busy = ''                     # what Hanami Sensors' setup is doing, while it runs
         self._clearing = False                      # an update's leftovers being cleared away
         self._tray_shape = None                     # what the tray menu was last made of
@@ -975,12 +977,48 @@ class Controller(QObject):
             self._reading.add(key)
 
             def read():
-                try:
-                    version = installer.exe_version(exe)
-                except Exception:  # noqa: BLE001 - no version, then
-                    version = ''
-                self._bridge.version_read.emit(name, key, version)
+                self._bridge.version_read.emit(name, key, self._read_version(name, exe))
             threading.Thread(target=read, name='hanami-version', daemon=True).start()
+        return ''
+
+    def _read_version(self, name: str, exe: Path, release=None) -> str:
+        """On a thread: the version of the copy at exe - stamped in it, else told by its hash
+        against release (the newest known, if not given)."""
+        try:
+            return installer.exe_version(exe) or self._version_by_hash(name, exe, release)
+        except Exception:  # noqa: BLE001 - no version, then
+            return ''
+
+    def _versions_with(self, found: dict, exes: dict) -> None:
+        """On a check's thread, once its releases are in: each copy's version read now, so what the
+        check then says (up to date, or an update) goes by both. exes: name -> exe, looked up
+        before the thread began."""
+        for name, exe in exes.items():
+            release = found.get(name)
+            if exe is None or not isinstance(release, releases.Release):
+                continue
+            try:
+                key = (str(exe), exe.stat().st_mtime)
+            except OSError:
+                continue
+            self._versions[key] = self._read_version(name, exe, release)
+
+    def _version_by_hash(self, name: str, exe: Path, release=None) -> str:
+        """On a thread: the version of an exe with none stamped in it (Homework Hub's before 1.12.18),
+        told by whether it is, byte for byte, the newest release's (its SHA-256). One that isn't is
+        noted in _not_newest: it is older than the newest release, as no copy of it is built here
+        ahead of its releases. Until 2026-11-21 Hanami could not tell, and said it was up to date."""
+        release = release or self.latest.get(name)
+        if release is None or release.asset is None or not release.asset.sha256:
+            return ''
+        digest = hashlib.sha256()
+        with open(exe, 'rb') as file:
+            for chunk in iter(lambda: file.read(1 << 20), b''):
+                digest.update(chunk)
+        if digest.hexdigest().lower() == release.asset.sha256.lower():
+            self._not_newest.discard(name)
+            return release.version
+        self._not_newest.add(name)
         return ''
 
     def _version_read(self, name: str, key: tuple, version: str) -> None:
@@ -991,10 +1029,11 @@ class Controller(QObject):
 
     def built_here(self, name: str) -> Path | None:
         """The folder of this PC's own build of an app, which Hanami didn't install and updates
-        where it is - unless it has its own updater. Not a copy pointed to by hand."""
+        where it is. Not a copy pointed to by hand. (An app with an updater of its own - Grabbit,
+        Homework Hub - is offered its updates too, but not put in by itself: _auto_update.)"""
         app = catalog.BY_NAME[name]
         exe = self.settings.exe(name)
-        if exe is None or exe != app.dev_build or app.updates_itself or self.settings.installed(name):
+        if exe is None or exe != app.dev_build or self.settings.installed(name):
             return None
         return exe.parent
 
@@ -1006,8 +1045,21 @@ class Controller(QObject):
         record = self.settings.installed(name)
         if record is not None:
             return releases.is_newer(release.version, record.get('version'))
-        return (self.built_here(name) is not None
-                and releases.is_newer(release.version, self.version_of(name, self.settings.exe(name))))
+        if self.built_here(name) is None:
+            return False
+        version = self.version_of(name, self.settings.exe(name))
+        if not version:
+            return name in self._not_newest              # no version stamped in it, and not the newest release
+        return releases.is_newer(release.version, version)
+
+    def _unrecorded_exes(self, names: list[str]) -> dict:
+        """The exes of the apps whose version Hanami has no record of (it didn't install them)."""
+        return {name: self.settings.exe(name) for name in names if self.settings.installed(name) is None}
+
+    def _forget_unknown_versions(self) -> None:
+        """New releases known: versions not told before (one judged against the release by its
+        hash) are read again."""
+        self._versions = {key: version for key, version in self._versions.items() if version}
 
     # ------------------------------------------------------------------ releases
 
@@ -1019,6 +1071,7 @@ class Controller(QObject):
         self._show_checked()
         self._update_window()
         apps = list(catalog.SUITE) + [catalog.HANAMI]
+        exes = self._unrecorded_exes([app.name for app in catalog.SUITE])
 
         def work():
             results = {}
@@ -1029,6 +1082,7 @@ class Controller(QObject):
                     results[app.name] = str(error)
                 except Exception as error:  # noqa: BLE001 - a bug here must not take Hanami down
                     results[app.name] = f'The check failed: {error}'
+            self._versions_with(results, exes)
             self._bridge.checked.emit(results)
 
         threading.Thread(target=work, name='hanami-check', daemon=True).start()
@@ -1041,6 +1095,7 @@ class Controller(QObject):
         self._checking_apps.add(name)
         self._card_note(name, 'Checking for updates…')
         app = catalog.BY_NAME[name]
+        exes = self._unrecorded_exes([name])
 
         def work():
             try:
@@ -1049,6 +1104,7 @@ class Controller(QObject):
                 result = str(error)
             except Exception as error:  # noqa: BLE001 - a bug here must not take Hanami down
                 result = f'The check failed: {error}'
+            self._versions_with({name: result}, exes)
             self._bridge.app_checked.emit(name, result)
 
         threading.Thread(target=work, name=f'hanami-check-{name}', daemon=True).start()
@@ -1058,9 +1114,15 @@ class Controller(QObject):
         if isinstance(result, releases.Release):
             self.latest[name] = result
             self.problems.pop(name, None)
+            self._forget_unknown_versions()
+            exe = self.settings.exe(name)
+            record = self.settings.installed(name)
+            have = str(record.get('version') or '') if record else self.version_of(name, exe)
             if self.update_available(name):
                 note = f'Version {result.version} available.'
-            elif self.settings.exe(name) is None:
+            elif exe is None or not have:
+                # not here, or its version not yet told: only what the newest is (never "up to date"
+                # unless it is known to be)
                 note = f'Latest version: {result.version}.'
             else:
                 note = 'Up to date.'
@@ -1078,6 +1140,7 @@ class Controller(QObject):
         self._checking = False
         self._checked_at = time.monotonic()
         self._checked_wall = time.time()
+        self._forget_unknown_versions()
         for name, result in results.items():
             if isinstance(result, releases.Release):
                 self.latest[name] = result
@@ -1110,6 +1173,8 @@ class Controller(QObject):
         if not self.settings.auto_update:
             return
         for app in catalog.SUITE:
+            if app.updates_itself and self.settings.installed(app.name) is None:
+                continue                # a copy Hanami didn't install updates itself; Update is there if asked
             if self.update_available(app.name) and app.name not in self.jobs and not self.is_running(app.name) \
                     and not self._holding(app.name):
                 self.install_app(app.name)
