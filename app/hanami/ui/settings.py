@@ -24,11 +24,11 @@ from .suitesettings import glyph_font  # noqa: F401 - the icon font, read once i
 
 SOURCE = 'https://github.com/blossqt/hanami'
 
-UPDATE_CHOICES = {'install': 'Install it', 'tell': 'Tell me', 'off': 'Nothing'}
+UPDATE_CHOICES = {'install': 'Install', 'tell': 'Notify', 'off': 'Off'}
 UPDATE_LINES = {
-    'install': 'Hanami looks twice a day and when you open it. An app you’re using is updated once you quit it.',
-    'tell': 'Hanami looks twice a day and when you open it.',
-    'off': 'Hanami looks only when you ask, and doesn’t update itself.',
+    'install': 'Updates are checked twice a day and when Hanami opens. An app in use is updated after it closes.',
+    'tell': 'Updates are checked twice a day and when Hanami opens.',
+    'off': 'Updates are checked only on request, and Hanami does not update itself.',
 }
 
 
@@ -101,7 +101,7 @@ class SettingsWindow(QWidget):
         page, layout = self._page('General', '')
         frame, box = _section('Starting up')
         holder, self.startup = _switch('Start Hanami when I sign in to Windows',
-                                       'It starts in the tray, without opening its window.',
+                                       'Hanami starts in the tray, without opening its window.',
                                        starts_with_windows)
         box.addWidget(holder)
         group, choices = suitesettings.group('Start with Hanami in the background')
@@ -132,7 +132,7 @@ class SettingsWindow(QWidget):
         page, layout = self._page('Edge panel', '')
         frame, box = _section('')
         holder, self.panel_on = _switch('Slide out a panel at the edge of the screen',
-                                        'It stays shut over games and anything full screen.',
+                                        'It stays closed over games and full-screen windows.',
                                         bool(panel_edge))
         self.panel_on.toggled.connect(self._panel_edited)
         box.addWidget(holder)
@@ -272,8 +272,7 @@ class SettingsWindow(QWidget):
         return page
 
     def _appearance(self) -> QWidget:
-        page, layout = self._page('Appearance', 'For every suite app: Keytap, Dropshift, Grabbit and Homework Hub '
-                                                'follow what you choose here within a few seconds.')
+        page, layout = self._page('Appearance', 'Applies to every app in the suite within a few seconds.')
         frame, box = _section('Light or dark')
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -325,8 +324,8 @@ class SettingsWindow(QWidget):
     def _games(self) -> QWidget:
         page, layout = self._page('Games', '')
         frame, box = _section('While a full-screen game is in front')
-        holder, self.game_quiet = _switch('Keep the suite quiet', 'Notifications wait until you leave the game, and '
-                                          'the glass stops updating.', theme.game_quiet_chosen())
+        holder, self.game_quiet = _switch('Keep the suite quiet', 'Notifications are held until the game is no '
+                                          'longer in front, and the glass stops updating.', theme.game_quiet_chosen())
         self.game_quiet.toggled.connect(self._game_edited)
         box.addWidget(holder)
         group, choices = suitesettings.group('Grabbit’s downloads')
@@ -346,10 +345,10 @@ class SettingsWindow(QWidget):
         row.addWidget(suitesettings.Segmented(list(self.download_buttons.values())))
         row.addStretch(1)
         choices.addLayout(row)
-        box.addWidget(_label('Slowed down, they take at most 1 MB/s down and 64 KB/s up.', suitesettings.SMALL,
+        box.addWidget(_label('Slow down limits them to 1 MB/s download and 64 KB/s upload.', suitesettings.SMALL,
                              role='dim', wrap=True))
-        box.addWidget(_label('A game counts when Windows knows it as one, as Game Bar does, and its window fills the '
-                             'screen.', suitesettings.SMALL, role='dim', wrap=True))
+        box.addWidget(_label('A game is a program Windows lists as a game, as Game Bar does, with its window filling '
+                             'the screen.', suitesettings.SMALL, role='dim', wrap=True))
         self._game_edited(theme.game_quiet_chosen(), save=False)
         layout.addWidget(frame)
         layout.addStretch(1)
@@ -402,7 +401,7 @@ class SettingsWindow(QWidget):
     def _screen_text(self, on: bool, hotkey: str) -> QWidget:
         page, layout = self._page('Screen text', '')
         frame, box = _section('Copy text from the screen')
-        holder, self.text_on = _switch('Open with a hotkey', 'Windows reads the text, on this PC.', on)
+        holder, self.text_on = _switch('Open with a hotkey', 'Text recognition runs on this PC, through Windows.', on)
         self.text_on.toggled.connect(self._text_edited)
         box.addWidget(holder)
         row = QHBoxLayout()
@@ -478,8 +477,8 @@ class SettingsWindow(QWidget):
         choices.addLayout(row)
         self.update_line = _label('', suitesettings.SMALL, role='dim', wrap=True)
         choices.addWidget(self.update_line)
-        holder, self.hanami_auto = _switch('Update Hanami by itself', 'It restarts for a moment to do it, while its '
-                                           'windows and panel are closed - never during a game.', hanami)
+        holder, self.hanami_auto = _switch('Update Hanami by itself', 'Hanami restarts briefly to update, only while '
+                                           'its windows and panel are closed and never during a game.', hanami)
         self.hanami_auto.toggled.connect(self.hanami_updates_changed)
         box.addWidget(holder)
         self._show_update_choice(chosen)
@@ -584,9 +583,9 @@ class SettingsWindow(QWidget):
         elif state.installed:
             text = 'Installed.'
         elif not state.pawnio:
-            text = 'PawnIO isn’t installed. FanControl and LibreHardwareMonitor install it.'
+            text = 'PawnIO is not installed. FanControl and LibreHardwareMonitor install it.'
         elif not state.dotnet:
-            text = 'It needs Microsoft’s .NET 10 Runtime.'
+            text = 'Requires the Microsoft .NET 10 Runtime.'
         else:
             text = 'Not installed.'
         self.sensors_status.setText(text)
@@ -723,7 +722,7 @@ class SettingsWindow(QWidget):
         from . import pins
         pin = pins.for_address(self.address.text())
         if pin is None:
-            self._show_pinned('That isn’t a website address.' if self.address.text().strip() else '')
+            self._show_pinned('That is not a website address.' if self.address.text().strip() else '')
             return
         self.address.clear()
         self._pin(pin)

@@ -51,6 +51,7 @@ STATS_QUICK = 250, 2.0  # ms between samples, for the first s of it: so the proc
 SET_HELD = 2.0          # s after a brightness slider is moved during which a reading doesn't move it back
                         # (the reading may be from before)
 FOLD_MS = theme.STEADY           # the volume and brightness sliders dropping down, or folding away
+FOLD_WAIT = 60                   # ms between looks for a slide's end, to lay the sliders out after it
 LEVELS = 'sliders'           # the suite's icon of two sliders, for the volume and brightness
 WHEEL_STEP = 2          # % a slider moves for each notch of the scroll wheel over it
 MARGIN = 10           # between the panel and the screen's edge
@@ -765,6 +766,7 @@ class EdgePanel(QWidget):
         self._buttons_on = set(BUTTONS)
         self.screens_open = False
         self._folding: QVariantAnimation | None = None
+        self._fold_waiting = False
         layout.addWidget(self.screens)
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -879,7 +881,13 @@ class EdgePanel(QWidget):
 
     def _show_fold(self) -> None:
         """The sliders button, with the volume or a monitor to set - and, if they are down, as many
-        sliders as there are now."""
+        sliders as there are now. Not while the panel slides: laid out again and resized then (the
+        volume read as it slid out for the first time), it stopped for some 50 ms mid-slide."""
+        if getattr(self, '_suite_gliding', False):
+            if not self._fold_waiting:
+                self._fold_waiting = True
+                QTimer.singleShot(FOLD_WAIT, self, self._fold_after_slide)
+            return
         for row in self.brightness_rows:
             row.setHidden(not self._brightness_on)
         self._screens.activate()
@@ -892,6 +900,10 @@ class EdgePanel(QWidget):
         elif self.screens_open:
             self._drop(self._sliders.height())
         self.adjustSize()
+
+    def _fold_after_slide(self) -> None:
+        self._fold_waiting = False
+        self._show_fold()
 
     def _fold_to(self, open_: bool, animate: bool = True) -> None:
         """Drop the sliders down under their button, or fold them away - the panel growing

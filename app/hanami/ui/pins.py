@@ -128,11 +128,11 @@ def _clean_environment():
 def open_pin(pin: Pin) -> str:
     """Open it, as a double-click in Explorer would; what went wrong, if anything."""
     if pin.kind != 'website' and not Path(pin.target).exists():
-        return f'{pin.name} isn’t there any more.'
+        return f'{pin.name} no longer exists.'
     folder = str(Path(pin.target).parent) if pin.kind == 'file' else None
     try:
         with _clean_environment():
             os.startfile(pin.target, cwd=folder)
     except OSError:
-        return f'{pin.name} wouldn’t open.'
+        return f'{pin.name} did not open.'
     return ''

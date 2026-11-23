@@ -182,7 +182,7 @@ def latest(app: SuiteApp, timeout: float = 15) -> Release:
             raise ReleaseError('GitHub is limiting how often this can be asked. Try again in an hour.') from None
         raise ReleaseError(f'GitHub answered {error.code}.') from None
     except (urllib.error.URLError, OSError, ValueError):
-        raise ReleaseError("Couldn't reach GitHub. Check the internet connection.") from None
+        raise ReleaseError('GitHub could not be reached. Check the internet connection.') from None
     try:
         return verify_and_parse(app, manifest, signature)
     except ReleaseError:
@@ -223,7 +223,7 @@ def download(asset: Asset, folder: Path, progress=None, cancel=None) -> Path:
                 if progress:
                     progress(done, asset.size)
         if done != asset.size or digest.hexdigest() != asset.sha256:
-            raise ReleaseError('The download didn’t match the release, so it wasn’t installed.')
+            raise ReleaseError('The download did not match the release, so it was not installed.')
     except ReleaseError:
         part.unlink(missing_ok=True)
         raise

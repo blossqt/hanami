@@ -327,7 +327,7 @@ class SoundTests(_Controlled):
         self.outputs = [o for o in self.outputs if o.id != 'hp']
         self.controller.switch_sound()
         self.assertEqual(self.now, 'ed', 'nothing changed')
-        self.assertEqual(self.controller.sound_popup.name, 'Headphones (Protocol Max) isn’t connected')
+        self.assertEqual(self.controller.sound_popup.name, 'Headphones (Protocol Max) is not connected')
 
     def test_a_new_id_for_the_same_device(self):
         """Another USB port or a driver put in again: Windows' id changes, the name doesn't (the
@@ -344,7 +344,7 @@ class SoundTests(_Controlled):
         self.controller.switch_sound()                      # (back to the speakers)
         self.controller.switch_sound()
         self.assertEqual(self.now, 'ed', 'two of that name: not a guess between them')
-        self.assertIn('isn’t connected', self.controller.sound_popup.name)
+        self.assertIn('is not connected', self.controller.sound_popup.name)
 
     def test_the_switch_finds_a_new_id_by_itself(self):
         self.controller.outputs_chosen()
@@ -479,7 +479,7 @@ class ScreenTextTests(_Controlled):
         from unittest import mock
         with mock.patch.object(hanami.suiteocr, 'available', lambda: False):
             self.controller.copy_screen_text()
-        self.assertEqual(self.told[-1][0], 'Windows can’t read text here')
+        self.assertEqual(self.told[-1][0], 'Text recognition is not available')
         self.assertFalse(self.controller.screen_text.is_open)
 
 

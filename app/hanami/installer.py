@@ -114,7 +114,7 @@ def stage(app: SuiteApp, archive: Path, progress: Progress | None = None, staged
             needed = sum(m.file_size for m in members)
             free = shutil.disk_usage(staged).free
             if free < needed + (200 << 20):
-                raise ReleaseError(f'There isn’t enough free space: {app.name} needs {needed / 1e6:.0f} MB '
+                raise ReleaseError(f'There is not enough free space: {app.name} needs {needed / 1e6:.0f} MB '
                                    f'and {free / 1e6:.0f} MB is free.')
             root = staged.resolve()
             for index, member in enumerate(members):
@@ -123,7 +123,7 @@ def stage(app: SuiteApp, archive: Path, progress: Progress | None = None, staged
                 parts = Path(member.filename).parts[1:]
                 target = staged.joinpath(*parts).resolve() if parts else None
                 if target is None or root not in target.parents:
-                    raise ReleaseError(f'{app.name}’s release contains a file it shouldn’t.')
+                    raise ReleaseError(f'{app.name}’s release contains an unexpected file.')
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(member) as source, target.open('wb') as out:
                     shutil.copyfileobj(source, out, 1 << 20)
@@ -342,7 +342,7 @@ def swap_in(staged: Path, home: Path) -> None:
             except OSError:
                 pass
         shutil.rmtree(old, ignore_errors=True)
-        raise ReleaseError('Some of Hanami’s files are in use, so it wasn’t updated.') from None
+        raise ReleaseError('Some of Hanami’s files are in use, so it was not updated.') from None
     shutil.rmtree(old, ignore_errors=True)
 
 

@@ -501,10 +501,10 @@ class Controller(QObject):
         if reopen:
             QTimer.singleShot(0, lambda: self._reopen(reopen))
         if updated:
-            self._say('Hanami', f'Hanami is updated to {updated}.', icons.app_icon(), 4000)
+            self._say('Hanami', f'Hanami was updated to {updated}.', icons.app_icon(), 4000)
             win32.icon_changed(Path(sys.executable), win32.start_menu() / 'Hanami.lnk')
         elif failed:
-            self._say('Hanami', f'Hanami couldn’t update to {failed}: some of its files were in use.',
+            self._say('Hanami', f'Hanami could not update to {failed}: some of its files were in use.',
                       icons.app_icon(), 6000)
         self._clear_leftovers()
         threading.Thread(target=self._sweep, name='hanami-sweep', daemon=True).start()
@@ -539,7 +539,7 @@ class Controller(QObject):
         # PySide6 6.11 answers only whether it started, though its stubs still say (started, pid).
         started = result[0] if isinstance(result, tuple) else bool(result)
         if not started:
-            self._say('Hanami', f'{name} would not start.', icons.app_icon(), 5000)
+            self._say('Hanami', f'{name} did not start.', icons.app_icon(), 5000)
         elif not self.is_running(name):
             # Its card says so until it is seen running (_refresh), or for STARTING_FOR at most.
             self._starting[name] = time.monotonic() + STARTING_FOR
@@ -638,7 +638,7 @@ class Controller(QObject):
         if self.screen_text.is_open:
             self.screen_text.close()
         elif not suiteocr.available():
-            self._say('Windows can’t read text here', 'Add a language with text recognition in Windows '
+            self._say('Text recognition is not available', 'Add a language with text recognition in Windows '
                       'Settings, Time & language, Language & region.', icons.app_icon())
         else:
             self.screen_text.open()
@@ -692,16 +692,16 @@ class Controller(QObject):
             return
         try:
             if outputs is None:
-                raise OSError('the outputs couldn’t be listed')
+                raise OSError('the outputs could not be listed')
             if picked[0] in {o.id for o in outputs}:
                 audio.choose(picked[0])
                 said = picked[1]
             else:
-                said = f'{picked[1]} isn’t connected'
+                said = f'{picked[1]} is not connected'
                 say = True
         except OSError:
             traceback.print_exc()
-            said, say = 'The sound output couldn’t be changed', True
+            said, say = 'The sound output could not be changed', True
         if say:
             if self.sound_popup is None:
                 self.sound_popup = SoundPopup()
@@ -725,7 +725,7 @@ class Controller(QObject):
                 audio.choose(output.id)
         except OSError:
             traceback.print_exc()
-            said = 'The sound output couldn’t be changed'
+            said = 'The sound output could not be changed'
         else:
             said = output.name if output is not None else 'There is no other sound output'
         if self.sound_popup is None:
@@ -921,6 +921,22 @@ class Controller(QObject):
             pixmap = placeholder_icon(name, 48)
         self._panel_icons[name] = (key, pixmap)
         return pixmap
+
+    def _menu_icon(self, name: str, exe: Path | None) -> QIcon:
+        """An app's own icon, from its exe, for the tray menu (made before the panel is) - kept
+        until the exe changes."""
+        from PySide6.QtGui import QPixmap
+        try:
+            key = (str(exe), exe.stat().st_mtime)
+        except (OSError, AttributeError):
+            key = None
+        kept = self.__dict__.setdefault('_menu_icons', {}).get(name)
+        if kept is not None and kept[0] == key:
+            return kept[1]
+        image = win32.exe_icon(exe, 32) if key else None
+        icon = QIcon(QPixmap.fromImage(image)) if image is not None else QIcon(placeholder_icon(name, 32))
+        self._menu_icons[name] = (key, icon)
+        return icon
 
     def _panel_changed(self, edge: str) -> None:
         self.settings.panel_edge = edge
@@ -1155,9 +1171,9 @@ class Controller(QObject):
                     and self.settings.told(app.name) != self.latest[app.name].version:
                 self.settings.set_told(app.name, self.latest[app.name].version)
                 if self.settings.notify_updates:
-                    then = (f'It goes in once you quit {app.name}.' if self.settings.auto_update
+                    then = (f'It is installed after {app.name} closes.' if self.settings.auto_update
                             else 'Open Hanami to update it.')
-                    self._say('Hanami', f'{app.name} {self.latest[app.name].version} is out. {then}',
+                    self._say('Hanami', f'{app.name} {self.latest[app.name].version} is available. {then}',
                               icons.app_icon(), 6000)
         self._update_window()
         self._show_checked()
@@ -1213,7 +1229,7 @@ class Controller(QObject):
             except releases.ReleaseError as error:
                 self._bridge.hanami_staged.emit(None, str(error))
             except Exception as error:  # noqa: BLE001 - said, never an error box
-                self._bridge.hanami_staged.emit(None, f'Hanami didn’t update: {error}')
+                self._bridge.hanami_staged.emit(None, f'Hanami did not update: {error}')
 
         threading.Thread(target=work, name='hanami-self-update', daemon=True).start()
 
@@ -1283,7 +1299,7 @@ class Controller(QObject):
                              creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
         except OSError as error:
             installer.throw_away(staged)
-            self._hanami_staged(None, f'Hanami didn’t update: {error}')
+            self._hanami_staged(None, f'Hanami did not update: {error}')
             return
         self.quit()
 
@@ -1326,7 +1342,7 @@ class Controller(QObject):
         if self._checking:
             text = 'Looking for updates…'
         elif not self._checked_wall:
-            text = 'Hanami hasn’t looked yet.' if self.settings.check_updates else 'Hanami looks only when you ask.'
+            text = 'Not checked yet.' if self.settings.check_updates else 'Updates are checked only on request.'
         else:
             minutes = int((time.time() - self._checked_wall) // 60)
             hours = minutes // 60
@@ -1335,7 +1351,7 @@ class Controller(QObject):
             out = self._newer_names()
             found = ('Everything is up to date.' if not out else
                      f'{out[0]} is out.' if len(out) == 1 else f'{", ".join(out[:-1])} and {out[-1]} are out.')
-            text = f'Looked {when}. {found}'
+            text = f'Checked {when}. {found}'
         self.settings_window.show_checked(text, self._checking)
 
     def _hanami_updates_changed(self, on: bool) -> None:
@@ -1415,7 +1431,7 @@ class Controller(QObject):
             self._job_finished(job.name, f'Quit {job.name} first, then try again.')
             return
         if job.waited >= QUIT_WAIT:
-            self._job_finished(job.name, f'{job.name} didn’t quit. Quit it, then try again.')
+            self._job_finished(job.name, f'{job.name} did not quit. Quit it, then try again.')
             return
         job.waited += 0.5
         self._update_window()
@@ -1448,7 +1464,7 @@ class Controller(QObject):
             except releases.ReleaseError as error:
                 self._bridge.finished.emit(job.name, str(error))
             except Exception as error:  # noqa: BLE001 - shown on the card, never an error box
-                self._bridge.finished.emit(job.name, f'It didn’t install: {error}')
+                self._bridge.finished.emit(job.name, f'Not installed: {error}')
 
         threading.Thread(target=work, name=f'hanami-install-{app.name}', daemon=True).start()
 
@@ -1475,7 +1491,7 @@ class Controller(QObject):
             except releases.ReleaseError as error:
                 self._bridge.finished.emit(job.name, str(error))
             except Exception as error:  # noqa: BLE001
-                self._bridge.finished.emit(job.name, f'It didn’t install: {error}')
+                self._bridge.finished.emit(job.name, f'Not installed: {error}')
 
         threading.Thread(target=work, name=f'hanami-place-{app.name}', daemon=True).start()
 
@@ -1492,7 +1508,7 @@ class Controller(QObject):
             except releases.ReleaseError as error:
                 self._bridge.finished.emit(job.name, str(error))
             except Exception as error:  # noqa: BLE001
-                self._bridge.finished.emit(job.name, f'It couldn’t be removed: {error}')
+                self._bridge.finished.emit(job.name, f'Not removed: {error}')
 
         threading.Thread(target=work, name=f'hanami-remove-{app.name}', daemon=True).start()
 
@@ -1564,8 +1580,9 @@ class Controller(QObject):
             self._fill(sub, member)
         if not_running:
             start = menu.addMenu('Start')
-            for app in not_running:
-                start.addAction(app.name, lambda n=app.name: self.open_app(n))
+            for app in not_running:                 # with their icons, as the running ones above have
+                start.addAction(self._menu_icon(app.name, self.settings.exe(app.name)), app.name,
+                                lambda n=app.name: self.open_app(n))
         menu.addSeparator()
         menu.addAction('Copy text from the screen' + (f'	{self._text_keys()}' if self._text_keys() else ''),
                        self.copy_screen_text)
@@ -1909,7 +1926,7 @@ def finish_update(argv: list[str]) -> int:
     home, pid = Path(argv[at + 1]), int(argv[at + 2])
     staged = Path(argv[argv.index('--from') + 1]) if '--from' in argv else Path(sys.executable).parent
     if not installer.wait_for(pid, QUIT_WAIT):
-        print(f'Hanami (pid {pid}) didn’t quit; nothing was changed.', file=sys.stderr)
+        print(f'Hanami (pid {pid}) did not quit; nothing was changed.', file=sys.stderr)
         return 2
     try:
         installer.swap_in(staged, home)

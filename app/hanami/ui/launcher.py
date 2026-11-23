@@ -463,7 +463,7 @@ class AppCard(QFrame):
         self.menu.clear()
         self.menu.addAction('Check for updates', lambda: self.check_clicked.emit(self.app.name))
         self.menu.addAction('Release notes', lambda: self.page_clicked.emit(self.app.name))
-        self.menu.addAction('Find it on this PC…', lambda: self.locate_clicked.emit(self.app.name))
+        self.menu.addAction('Locate program…', lambda: self.locate_clicked.emit(self.app.name))
         if s.installed:
             self.menu.addSeparator()
             self.menu.addAction(f'Uninstall {self.app.name}', lambda: self.uninstall_clicked.emit(self.app.name))
@@ -902,6 +902,6 @@ class LauncherWindow(QWidget):
         """
 
     def _locate(self, name: str) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, f'Where is {name}?', str(locate_start(name)), 'Programs (*.exe)')
+        path, _ = QFileDialog.getOpenFileName(self, f'Locate {name}', str(locate_start(name)), 'Programs (*.exe)')
         if path:
             self.exe_chosen.emit(name, path)

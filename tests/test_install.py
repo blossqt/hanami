@@ -178,7 +178,7 @@ class InstallTest(unittest.TestCase):
 
     def test_a_download_that_is_not_the_release_is_not_installed(self):
         publish('test/note', 'Note', '1.0.0', 'Note.exe', b'MZ one', claim={'sha256': '0' * 64})
-        with self.assertRaisesRegex(releases.ReleaseError, 'didn’t match'):
+        with self.assertRaisesRegex(releases.ReleaseError, 'did not match'):
             installer.install(NOTE, releases.latest(NOTE))
         self.assertFalse(catalog.install_dir(NOTE).exists())
 
@@ -203,7 +203,7 @@ class InstallTest(unittest.TestCase):
         publish('test/evil', 'Evil', '1.0.0', 'Evil-1.0.0-win64.zip',
                 zipped(folder, 'Evil', {'Evil/../../escaped.txt': 'out'}))
         evil = SuiteApp('Evil', '', 'Evil.exe', WORK / 'x', 'test/evil', 'unused', self_test=False)
-        with self.assertRaisesRegex(releases.ReleaseError, 'shouldn’t'):
+        with self.assertRaisesRegex(releases.ReleaseError, 'unexpected file'):
             installer.install(evil, releases.latest(evil))
         self.assertFalse((WORK / 'escaped.txt').exists())
         self.assertFalse((WORK / 'Programs' / 'escaped.txt').exists())

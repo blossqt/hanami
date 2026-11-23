@@ -58,7 +58,7 @@ from dataclasses import dataclass, replace
 
 from PySide6.QtCore import (QAbstractAnimation, QEasingCurve, QEvent, QObject, QPoint, QPointF, QPropertyAnimation,
                             QRect, QRectF, QSize, Qt, QSequentialAnimationGroup, QTimer, QVariantAnimation, Signal)
-from PySide6.QtGui import (QBrush, QColor, QFont, QFontDatabase, QGuiApplication, QImage, QLinearGradient,
+from PySide6.QtGui import (QBrush, QColor, QCursor, QFont, QFontDatabase, QGuiApplication, QImage, QLinearGradient,
                            QFontMetricsF, QPainter, QPainterPath, QPalette, QPen, QPixmap, QRegion,
                            QTextLayout)
 from PySide6.QtWidgets import (QAbstractItemView, QAbstractScrollArea, QApplication, QCheckBox,
@@ -1528,9 +1528,12 @@ class _Frosting(QObject):
             _stop_live(obj)
             _watch_around(obj, stop=True)
         elif kind in (QEvent.Move, QEvent.Resize) and obj.isVisible() and _screen_glass(obj):
-            if not getattr(obj, '_suite_gliding', False) and not _waiting_for_paint(obj):
+            gliding = getattr(obj, '_suite_gliding', False)
+            if not gliding and not _waiting_for_paint(obj):
                 _follow(obj)
-            if _frameless(obj):
+            # A gliding window keeps the glass it had, drawn from its own corner, so a move alone
+            # changes nothing in it: repainting it whole each frame of the glide only made frames late.
+            if _frameless(obj) and not (gliding and kind == QEvent.Move):
                 obj.update()
         elif kind == QEvent.ChildAdded and obj.isVisible():
             QTimer.singleShot(0, obj, lambda: _animate_parts(obj))
@@ -2535,7 +2538,9 @@ class _Light(QObject):
         kind = event.type()
         if kind == QEvent.Paint:
             return self._paint(obj, event)
-        elif not motion_on() or isinstance(obj, QLineEdit) or not _fades(obj):
+        if kind == QEvent.MouseButtonPress and _fades(obj):
+            self._after_menu(obj)
+        if not motion_on() or isinstance(obj, QLineEdit) or not _fades(obj):
             return False
         elif kind in (QEvent.HoverEnter, QEvent.HoverMove):
             self._state(obj)['at'] = event.position()
@@ -2551,6 +2556,34 @@ class _Light(QObject):
         elif kind == QEvent.MouseButtonRelease:
             self._to(obj, 'press', 0.0, 480)
         return False
+
+    def _after_menu(self, button) -> None:
+        """A button whose press opens its menu (a ⋯ button) never hears its release, which the menu
+        takes, nor the pointer leaving while the menu is open: it stayed pressed and lit after the
+        menu closed. Now, once its menu closes, it eases back as if let go, and lets go of the
+        hover unless the pointer is on it still."""
+        menu = button.menu() if hasattr(button, 'menu') else None
+        if menu is None or getattr(button, '_suite_menu_watched', None) is menu:
+            return
+        button._suite_menu_watched = menu
+        ref = weakref.ref(button)
+
+        def closed():
+            b = ref()
+            if b is None:
+                return
+            try:
+                over = b.rect().contains(b.mapFromGlobal(QCursor.pos()))
+                if not over:
+                    b.setAttribute(Qt.WA_UnderMouse, False)     # Qt's own :hover, for its style sheet
+                if motion_on() and getattr(b, _LIGHT, None):
+                    self._to(b, 'press', 0.0, 480)
+                    if not over:
+                        self._to(b, 'hover', 0.0, 380)
+                b.update()
+            except RuntimeError:            # the button went with its window
+                pass
+        menu.aboutToHide.connect(closed)
 
     @staticmethod
     def _state(obj) -> dict:

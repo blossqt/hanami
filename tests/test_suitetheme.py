@@ -847,6 +847,39 @@ class PressTests(unittest.TestCase):
         self.assertFalse(plain.isNull())
         window.close()
 
+    def test_a_menu_button_lets_go_once_its_menu_closes(self):
+        """A ⋯ button opens its menu as it is pressed, so its release goes to the menu: it stayed
+        shaded and lit after the menu closed, with the pointer long gone."""
+        from PySide6.QtCore import QEvent, QPoint, QPointF
+        from PySide6.QtGui import QMouseEvent
+        from PySide6.QtWidgets import QMenu
+        window = QWidget()
+        button = QToolButton(window)
+        button.resize(28, 20)
+        menu = QMenu(button)
+        menu.addAction('Release notes')
+        button.setMenu(menu)
+        button.installEventFilter(suitetheme._lights())
+        window.show()
+        app.processEvents()
+        elsewhere = button.mapToGlobal(QPoint(400, 400))
+        with mock.patch.object(suitetheme, 'motion_on', return_value=True), \
+                mock.patch.object(suitetheme.QCursor, 'pos', return_value=elsewhere):
+            state = suitetheme._Light._state(button)
+            state['hover'] = 1.0
+            button.setAttribute(Qt.WA_UnderMouse, True)
+            press = QMouseEvent(QEvent.MouseButtonPress, QPointF(14, 10), QPointF(14, 10), Qt.LeftButton,
+                                Qt.LeftButton, Qt.NoModifier)
+            suitetheme._lights().eventFilter(button, press)     # as the press opens the menu
+            _wait(200)
+            self.assertGreater(state['press'], 0.5)
+            menu.aboutToHide.emit()                             # the menu closes: no release ever comes
+            _wait(600)
+            self.assertLess(state['press'], 0.01, 'eased back as if let go')
+            self.assertLess(state['hover'], 0.01, 'and no longer lit, the pointer being elsewhere')
+            self.assertFalse(button.testAttribute(Qt.WA_UnderMouse))
+        window.close()
+
 
 class IconTests(unittest.TestCase):
     def test_one_set(self):
