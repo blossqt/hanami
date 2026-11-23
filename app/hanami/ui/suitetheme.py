@@ -2216,10 +2216,11 @@ def _soften(shot, factor: int):
     return soft
 
 
-def _tone(shot, inner: QRectF) -> tuple[float, float]:
-    """How bright what is behind the window is (0 to 1), and how busy (how much it changes from
-    one spot to the next) - so the glass's tint can keep text on it easy to read. (Of a
-    QPixmap, or on any thread a QImage.)"""
+def _tone(shot, inner: QRectF) -> tuple[float, float, float, float]:
+    """How bright what is behind the window is (0 to 1), how busy (how much it changes from one
+    spot to the next), and how bright its darker and its brighter parts are (TONE_SPREAD in from
+    either end) - so the glass's tint can keep text on it easy to read even where only part of
+    it lies over a dark window, say. (Of a QPixmap, or on any thread a QImage.)"""
     dpr = shot.devicePixelRatio()
     part = shot.copy(QRect(round(inner.x() * dpr), round(inner.y() * dpr), max(1, round(inner.width() * dpr)),
                            max(1, round(inner.height() * dpr))))
@@ -2232,16 +2233,21 @@ def _tone(shot, inner: QRectF) -> tuple[float, float]:
         return [[(0.0722 * raw[i] + 0.7152 * raw[i + 1] + 0.2126 * raw[i + 2]) / 255
                  for i in range(y * line, y * line + 4 * n, 4)] for y in range(n)]
 
-    mean = sum(map(sum, lum(Qt.SmoothTransformation))) / (n * n)
+    smooth = sorted(value for row in lum(Qt.SmoothTransformation) for value in row)
+    mean = sum(smooth) / (n * n)
     # Busy from single pixels, not averages: averaging blurred lines of small text - the hardest
     # thing to read over - into a calm grey, and the tint stayed near 100 over a page of text.
     spots = lum(Qt.FastTransformation)
     busy = sum(abs(spots[y][x] - spots[y][x + 1]) + abs(spots[y][x] - spots[y + 1][x])
                for y in range(n - 1) for x in range(n - 1)) / ((n - 1) ** 2)
-    return mean, busy
+    edge = int(len(smooth) * TONE_SPREAD)
+    return mean, busy, smooth[edge], smooth[-1 - edge]
 
 
-def _tone_around(shot: QPixmap, inside: QRectF) -> tuple[float, float]:
+TONE_SPREAD = 0.08      # the darker and brighter parts behind a window: this share in from either end
+
+
+def _tone_around(shot: QPixmap, inside: QRectF) -> tuple[float, float, float, float]:
     """_tone of the strips of a shot around the window in it, as a guess at what is behind it."""
     width, height = shot.width() / shot.devicePixelRatio(), shot.height() / shot.devicePixelRatio()
     strips = [QRectF(0, 0, width, inside.top()), QRectF(0, inside.bottom(), width, height - inside.bottom()),
@@ -2250,8 +2256,7 @@ def _tone_around(shot: QPixmap, inside: QRectF) -> tuple[float, float]:
     parts = [(strip.width() * strip.height(), _tone(shot, strip)) for strip in strips
              if strip.width() >= 2 and strip.height() >= 2]
     total = sum(area for area, _ in parts) or 1
-    return (sum(area * tone[0] for area, tone in parts) / total,
-            sum(area * tone[1] for area, tone in parts) / total)
+    return tuple(sum(area * tone[k] for area, tone in parts) / total for k in range(4))
 
 
 def _lens_for(window: QWidget) -> QPixmap | None:
@@ -2475,14 +2480,25 @@ def _around(shot, outer: QRect, g: QRect, gap: int | None = None) -> list:
     return values
 
 
+READ_LIGHT, READ_DARK = 150 / 255, 95 / 255    # what is behind a pop-up's words: at least / at most, as Dockline's
+
+
 def _frost_tint(window: QWidget) -> int:
     """How much frosted glass tints what is behind it (0 to 255): canvasui.dev's quarter (black at
     25%, on dark), and more only where text on it would be hard to read - over what is bright
     under light text, or dark under dark text, or busy."""
-    mean, busy = getattr(window, '_suite_tone', None) or (0.5, 0.05)
+    tone = getattr(window, '_suite_tone', None) or (0.5, 0.05)
+    mean, busy = tone[0], tone[1]
+    low, high = (tone[2], tone[3]) if len(tone) > 3 else (mean, mean)
+    # Enough tint to bring the darker part behind up to READ_LIGHT under dark text (the brighter part
+    # down to READ_DARK under light text), whatever transparency is chosen. The old lift went by the
+    # average alone, with the base tint assumed: over half a dark window and half a white page, at
+    # full transparency, dark words sat on a 24% veil over the dark half (Keytap's picker, 2026-11-23).
     if is_dark():
-        return _clear_scaled(64, 150 * max(0.0, mean - 0.4) + 400 * busy, 170)
-    return _clear_scaled(56, 130 * max(0.0, 0.6 - mean) + 400 * busy, 160)
+        need = 255 * (1 - READ_DARK / high) if high > READ_DARK else 0.0
+        return _clear_scaled(64, max(150 * max(0.0, mean - 0.4), need) + 400 * busy, 170)
+    need = 255 * (READ_LIGHT - low) / (1 - low) if low < READ_LIGHT else 0.0
+    return _clear_scaled(56, max(130 * max(0.0, 0.6 - mean), need) + 400 * busy, 160)
 
 
 def _paint_frosted(painter, rect, radius: float, window: QWidget, lens: QPixmap) -> None:

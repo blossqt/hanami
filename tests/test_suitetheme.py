@@ -235,13 +235,36 @@ class LensTests(unittest.TestCase):
         for x in range(0, 64, 4):
             painter.fillRect(x, 0, 2, 64, QColor('#000000'))
         painter.end()
-        bright, still = suitetheme._tone(calm, QRectF(0, 0, 64, 64))
-        _, lively = suitetheme._tone(busy, QRectF(0, 0, 64, 64))
+        bright, still, *_ = suitetheme._tone(calm, QRectF(0, 0, 64, 64))
+        _, lively, *_ = suitetheme._tone(busy, QRectF(0, 0, 64, 64))
         self.assertGreater(bright, 0.95)
         self.assertLess(still, 0.01)
         self.assertGreater(lively, 0.1)
         self.assertEqual(suitetheme._tone(busy.toImage(), QRectF(0, 0, 64, 64))[1], lively,
                          'the same on the glass thread, from an image')
+
+    def test_words_over_part_of_a_dark_window_stay_readable_however_clear(self):
+        """Half a dark window and half a white page behind a pop-up: its tint goes by the dark
+        part, not the average, and keeps it even with the glass chosen fully clear."""
+        half = QPixmap(64, 64)
+        half.fill(QColor('#ffffff'))
+        painter = QPainter(half)
+        painter.fillRect(0, 0, 32, 64, QColor('#202020'))
+        painter.end()
+        tone = suitetheme._tone(half, QRectF(0, 0, 64, 64))
+        self.assertLess(tone[2], 0.2, 'its darker part is seen')
+        window = QWidget()
+        window._suite_tone = tone
+        with mock.patch.object(suitetheme, 'is_dark', return_value=False), \
+                mock.patch.object(suitetheme, 'glass_clear', return_value=100):
+            alpha = suitetheme._frost_tint(window) / 255
+        self.assertGreater(tone[2] * (1 - alpha) + alpha, 0.5, 'the dark half is brought up behind dark words')
+        calm = QPixmap(64, 64)
+        calm.fill(QColor('#f4f4f4'))
+        window._suite_tone = suitetheme._tone(calm, QRectF(0, 0, 64, 64))
+        with mock.patch.object(suitetheme, 'is_dark', return_value=False), \
+                mock.patch.object(suitetheme, 'glass_clear', return_value=100):
+            self.assertLess(suitetheme._frost_tint(window), 10, 'a light, calm backdrop stays clear')
 
     def test_a_shot_is_made_into_glass_the_same_on_either_thread(self):
         m = suitetheme._MARGIN
