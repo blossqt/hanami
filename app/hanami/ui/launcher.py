@@ -79,10 +79,9 @@ _ICON = 44
 _NO_LIMIT = 16777215                    # Qt's QWIDGETSIZE_MAX, which PySide doesn't export
 _ICON_BUTTON = 30                       # a button's width, as an icon
 _BUTTON_PADDING = 40                    # a button's width, past its words
-_TRAY_WORDS = 'Closing this window keeps Hanami in the tray.'
 
-_BUSY = {'download': 'Downloading', 'unpack': 'Unpacking', 'check': 'Checking it starts',
-         'place': 'Putting it in place', 'quit': 'Waiting for it to quit', 'remove': 'Removing it'}
+_BUSY = {'download': 'Downloading', 'unpack': 'Unpacking', 'check': 'Verifying',
+         'place': 'Installing', 'quit': 'Waiting for the app to quit', 'remove': 'Removing'}
 
 
 
@@ -426,7 +425,7 @@ class AppCard(QFrame):
         self.state.setText(line)
         self.state.setVisible(bool(line))
         self.dot.set(None if s.exe is None else 'running' if s.running else 'stopped',
-                     'Running, in the tray' if s.running and s.in_tray else 'Running' if s.running
+                     'Running' if s.running
                      else 'Not running')
 
         busy = bool(s.busy)
@@ -681,7 +680,7 @@ class LauncherWindow(QWidget):
         layout.setSpacing(16)
         self._tier = FULL
         self._fitting = False
-        self._foot = ('', '', '')       # the footer whole, as plain words, and without the line about the tray
+        self._foot = ''
         self._foot_args = ('', '', False, False)
         self._checking = self._current = False
 
@@ -860,15 +859,15 @@ class LauncherWindow(QWidget):
         link = f'style="color:{theme.ink()}; text-decoration:none"'
         plain = note = ''
         if updating and waiting:              # put in by itself, waiting for Hanami to be out of use
-            plain = f'Hanami {updating} is ready - restart to update'
+            plain = f'Restart to update to Hanami {updating}'
             note = f'<a href="update" {link}>{plain}</a>'
         elif updating:
             plain = note = f'Updating to Hanami {updating}…'
         elif newer and can_update:
-            plain = f'Hanami {newer} is out - update'
+            plain = f'Update to Hanami {newer}'
             note = f'<a href="update" {link}>{plain}</a>'
         elif newer:
-            plain = f'Hanami {newer} is out - get it'
+            plain = f'Download Hanami {newer}'
             note = f'<a href="hanami" {link}>{plain}</a>'
         elif self._checking:
             plain = note = 'Checking for updates…'
@@ -878,16 +877,11 @@ class LauncherWindow(QWidget):
             plain = 'Check for updates'
             note = f'<a href="check" {link}>{plain}</a>'
         apart = '  ·  '
-        self._foot = (name + apart + _TRAY_WORDS + (apart + note if note else ''),
-                      name + apart + _TRAY_WORDS + (apart + plain if plain else ''),
-                      name + (apart + note if note else ''))
+        self._foot = name + (apart + note if note else '')
         self._show_foot()
 
     def _show_foot(self) -> None:
-        """The footer, the line about the tray left out when the window is too narrow for it."""
-        whole, plain, short = self._foot
-        margin = _SLIM_MARGIN if self._tier >= LINE else _ROOMY_MARGIN
-        words = whole if self.foot.fontMetrics().horizontalAdvance(plain) <= self.width() - 2 * margin else short
+        words = self._foot
         if self.foot.text() != words:
             self.foot.setText(words)
 

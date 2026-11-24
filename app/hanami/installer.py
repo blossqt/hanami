@@ -162,7 +162,7 @@ def check(app: SuiteApp, staged: Path, version: str) -> None:
         answer.unlink(missing_ok=True)
     # Keytap answers "0.1.0 (Bitwarden CLI …)": the version comes first.
     if said.split(' ', 1)[0] != version:
-        raise ReleaseError(f'{app.name} {version} would not start on this PC, so it was not installed.')
+        raise ReleaseError(f'{app.name} {version} did not start on this PC and was not installed.')
 
 
 # ------------------------------------------------------------------ placing

@@ -115,7 +115,7 @@ def outputs() -> list[Output]:
     try:
         enumerator = _create(CLSID_MMDeviceEnumerator, IID_IMMDeviceEnumerator)
     except OSError as error:
-        raise AudioError(f'Windows would not list its sound outputs ({error})') from None
+        raise AudioError(f'Windows did not list the sound outputs ({error})') from None
     try:
         collection = ctypes.c_void_p()
         _call(enumerator, 3, E_RENDER, DEVICE_STATE_ACTIVE, ctypes.byref(collection),
@@ -164,7 +164,7 @@ def choose(output_id: str) -> None:
     try:
         policy = _create(CLSID_PolicyConfigClient, IID_IPolicyConfig)
     except OSError as error:
-        raise AudioError(f'Windows would not change its sound output ({error})') from None
+        raise AudioError(f'Windows did not change the sound output ({error})') from None
     try:
         for role in ROLES:
             _call(policy, 13, output_id, role, argtypes=(wintypes.LPCWSTR, ctypes.c_int))   # SetDefaultEndpoint
@@ -227,7 +227,7 @@ def set_volume(percent: int) -> None:
     try:
         enumerator = _create(CLSID_MMDeviceEnumerator, IID_IMMDeviceEnumerator)
     except OSError as error:
-        raise AudioError(f'Windows would not find its sound output ({error})') from None
+        raise AudioError(f'Windows did not find the sound output ({error})') from None
     try:
         endpoint = _output_volume(enumerator)
         if endpoint is None:
@@ -305,7 +305,7 @@ def mute_mic(muted: bool) -> None:
     try:
         enumerator = _create(CLSID_MMDeviceEnumerator, IID_IMMDeviceEnumerator)
     except OSError as error:
-        raise AudioError(f'Windows would not find its microphone ({error})') from None
+        raise AudioError(f'Windows did not find the microphone ({error})') from None
     try:
         devices = _microphones(enumerator)
         try:

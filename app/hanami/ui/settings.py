@@ -26,9 +26,9 @@ SOURCE = 'https://github.com/blossqt/hanami'
 
 UPDATE_CHOICES = {'install': 'Install', 'tell': 'Notify', 'off': 'Off'}
 UPDATE_LINES = {
-    'install': 'Updates are checked twice a day and when Hanami opens. An app in use is updated after it closes.',
-    'tell': 'Updates are checked twice a day and when Hanami opens.',
-    'off': 'Updates are checked only on request, and Hanami does not update itself.',
+    'install': 'An app in use updates when it closes.',
+    'tell': '',
+    'off': 'Updates are checked only on request. Hanami does not update itself.',
 }
 
 
@@ -101,7 +101,7 @@ class SettingsWindow(QWidget):
         page, layout = self._page('General', '')
         frame, box = _section('Starting up')
         holder, self.startup = _switch('Start Hanami when I sign in to Windows',
-                                       'Hanami starts in the tray, without opening its window.',
+                                       'Hanami starts in the tray.',
                                        starts_with_windows)
         box.addWidget(holder)
         group, choices = suitesettings.group('Start with Hanami in the background')
@@ -158,8 +158,7 @@ class SettingsWindow(QWidget):
         self.page_switches: dict[str, QCheckBox] = {}
         for name, title, about in (
                 ('apps', 'Hanami suite', ''), ('pinned', 'Shortcuts', ''),
-                ('stats', 'Stats', 'The processor and memory - and, with an NVIDIA graphics card, its load, memory '
-                                   'and temperature.')):
+                ('stats', 'Stats', 'GPU load, memory and temperature require an NVIDIA graphics card.')):
             holder, check = _switch(title, about, name in chosen)
             check.toggled.connect(self._pages_edited)
             box.addWidget(holder)
@@ -180,8 +179,8 @@ class SettingsWindow(QWidget):
             self.button_switches[name] = check
         layout.addWidget(frame)
         frame, box = _section('Brightness')
-        holder, self.brightness_switch = _switch('Monitor brightness', 'A monitor has a slider only with DDC/CI on '
-                                                 'in its own menu.',
+        holder, self.brightness_switch = _switch('Monitor brightness', 'Requires DDC/CI, turned on in each '
+                                                 'monitor’s own menu.',
                                                  brightness_on)
         self.brightness_switch.toggled.connect(self.brightness_changed)
         box.addWidget(holder)
@@ -192,8 +191,8 @@ class SettingsWindow(QWidget):
         box.addWidget(self.monitors_found)
         layout.addWidget(frame)
         frame, box = _section('CPU temperature')
-        box.addWidget(_label('Hanami Sensors reads it, a small service that runs only while the stats page is in '
-                             'sight. Installing it asks for administrator permission.', suitesettings.SMALL, role='dim',
+        box.addWidget(_label('Requires the Hanami Sensors service. Installing it requires administrator '
+                             'permission.', suitesettings.SMALL, role='dim',
                              wrap=True))
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -272,7 +271,7 @@ class SettingsWindow(QWidget):
         return page
 
     def _appearance(self) -> QWidget:
-        page, layout = self._page('Appearance', 'Applies to every app in the suite within a few seconds.')
+        page, layout = self._page('Appearance', 'Applies to every app in the suite.')
         frame, box = _section('Light or dark')
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -325,7 +324,7 @@ class SettingsWindow(QWidget):
         page, layout = self._page('Games', '')
         frame, box = _section('While a full-screen game is in front')
         holder, self.game_quiet = _switch('Keep the suite quiet', 'Notifications are held until the game is no '
-                                          'longer in front, and the glass stops updating.', theme.game_quiet_chosen())
+                                          'longer in front.', theme.game_quiet_chosen())
         self.game_quiet.toggled.connect(self._game_edited)
         box.addWidget(holder)
         group, choices = suitesettings.group('Grabbit’s downloads')
@@ -347,8 +346,6 @@ class SettingsWindow(QWidget):
         choices.addLayout(row)
         box.addWidget(_label('Slow down limits them to 1 MB/s download and 64 KB/s upload.', suitesettings.SMALL,
                              role='dim', wrap=True))
-        box.addWidget(_label('A game is a program Windows lists as a game, as Game Bar does, with its window filling '
-                             'the screen.', suitesettings.SMALL, role='dim', wrap=True))
         self._game_edited(theme.game_quiet_chosen(), save=False)
         layout.addWidget(frame)
         layout.addStretch(1)
@@ -401,7 +398,7 @@ class SettingsWindow(QWidget):
     def _screen_text(self, on: bool, hotkey: str) -> QWidget:
         page, layout = self._page('Screen text', '')
         frame, box = _section('Copy text from the screen')
-        holder, self.text_on = _switch('Open with a hotkey', 'Text recognition runs on this PC, through Windows.', on)
+        holder, self.text_on = _switch('Open with a hotkey', '', on)
         self.text_on.toggled.connect(self._text_edited)
         box.addWidget(holder)
         row = QHBoxLayout()
@@ -477,8 +474,7 @@ class SettingsWindow(QWidget):
         choices.addLayout(row)
         self.update_line = _label('', suitesettings.SMALL, role='dim', wrap=True)
         choices.addWidget(self.update_line)
-        holder, self.hanami_auto = _switch('Update Hanami by itself', 'Hanami restarts briefly to update, only while '
-                                           'its windows and panel are closed and never during a game.', hanami)
+        holder, self.hanami_auto = _switch('Update Hanami automatically', 'Hanami restarts to update.', hanami)
         self.hanami_auto.toggled.connect(self.hanami_updates_changed)
         box.addWidget(holder)
         self._show_update_choice(chosen)
@@ -513,8 +509,7 @@ class SettingsWindow(QWidget):
         words = QVBoxLayout()
         words.setSpacing(16)                        # title, text and buttons evenly apart, as on the cards
         words.addWidget(suitesettings.heading(f'Hanami {__version__}', 17))
-        words.addWidget(_label('The suite’s launcher. It keeps one tray icon for every suite app, and installs and '
-                               'updates them from their signed releases.', suitesettings.SMALL, role='dim', wrap=True))
+        words.addWidget(_label('Hanami opens, installs and updates the suite’s apps.', suitesettings.SMALL, role='dim', wrap=True))
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
         notes = QPushButton('Release notes')
@@ -579,11 +574,11 @@ class SettingsWindow(QWidget):
         elif not state.bundled:
             text = 'Not in this build of Hanami.'
         elif state.installed and state.outdated:
-            text = f'Installed: version {state.installed}. Version {state.bundled} is ready.'
+            text = f'Version {state.installed} is installed. Version {state.bundled} is available.'
         elif state.installed:
             text = 'Installed.'
         elif not state.pawnio:
-            text = 'PawnIO is not installed. FanControl and LibreHardwareMonitor install it.'
+            text = 'Requires PawnIO, which is not installed (pawnio.eu).'
         elif not state.dotnet:
             text = 'Requires the Microsoft .NET 10 Runtime.'
         else:
@@ -601,7 +596,7 @@ class SettingsWindow(QWidget):
         elif names:
             text = 'Found: ' + ', '.join(names) + '.'
         else:
-            text = 'No monitor here answers DDC/CI.'
+            text = 'No monitor has DDC/CI turned on.'
         self.monitors_found.setText(text)
 
     def _panel_apps(self, hidden) -> QWidget:
@@ -685,13 +680,13 @@ class SettingsWindow(QWidget):
         room = len(self.pinned) < pins.MOST
         for widget in (self.add_file, self.add_folder, self.address, self.add_site):
             widget.setEnabled(room and self.panel_on.isChecked())
-        self.pin_note.setText(note or ('' if room else f'The panel holds {pins.MOST}.'))
+        self.pin_note.setText(note or ('' if room else f'The panel holds up to {pins.MOST} shortcuts.'))
         self.pin_note.setVisible(bool(self.pin_note.text()))
 
     def _pin(self, pin) -> None:
         from . import pins
         if any(p.kind == pin.kind and p.target.lower() == pin.target.lower() for p in self.pinned):
-            self._show_pinned(f'{pin.name} is there already.')
+            self._show_pinned(f'{pin.name} is already pinned.')
             return
         if len(self.pinned) >= pins.MOST:
             return
@@ -745,13 +740,14 @@ class SettingsWindow(QWidget):
 
     def _show_update_choice(self, choice: str) -> None:
         self.update_line.setText(UPDATE_LINES[choice])
+        self.update_line.setVisible(bool(UPDATE_LINES[choice]))
         self.hanami_auto.setEnabled(choice != 'off')        # it finds its own updates the same way
 
     def _show_credit(self) -> None:
         link = f'style="color:{theme.ink()}; text-decoration:none"'
-        self.credit.setText(f'The image behind this window is a photo by <a href="https://unsplash.com/photos/'
-                            f'pkpqoBp11Jc" {link}>Mi Min</a> on Unsplash. The image behind the edge panel is a photo by '
-                            f'<a href="https://unsplash.com/photos/j3TrGxN_rCM" {link}>Yan Liu</a>, also on Unsplash.')
+        self.credit.setText(f'Photos by <a href="https://unsplash.com/photos/pkpqoBp11Jc" {link}>Mi Min</a> (this window) '
+                            f'and <a href="https://unsplash.com/photos/j3TrGxN_rCM" {link}>Yan Liu</a> (edge panel) '
+                            f'on Unsplash.')
 
     def show_hanami_update(self, version: str, updating: bool) -> None:
         """The button to update Hanami now: with a newer one (version) to put in - and, once

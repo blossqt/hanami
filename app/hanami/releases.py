@@ -179,7 +179,7 @@ def latest(app: SuiteApp, timeout: float = 15) -> Release:
         if error.code == 404:
             raise ReleaseError(f'{app.name} has no release yet.') from None
         if error.code in (403, 429):
-            raise ReleaseError('GitHub is limiting how often this can be asked. Try again in an hour.') from None
+            raise ReleaseError('GitHub’s rate limit was reached. Try again in an hour.') from None
         raise ReleaseError(f'GitHub answered {error.code}.') from None
     except (urllib.error.URLError, OSError, ValueError):
         raise ReleaseError('GitHub could not be reached. Check the internet connection.') from None

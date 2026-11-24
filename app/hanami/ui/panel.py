@@ -116,7 +116,7 @@ class _EdgeTab(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip('Hanami - click, or drag to move')
+        self.setToolTip('Edge panel. Click to open, or drag to move.')
         self.edge = 'right'
         self._press: float | None = None
         self._moving = False
@@ -294,7 +294,7 @@ class _AddButton(QWidget):
         super().__init__()
         self.setFixedSize(PIN_TILE, PIN_ICON + 14)
         self.setCursor(Qt.PointingHandCursor)
-        self.setAccessibleName('Pin something')
+        self.setAccessibleName('Add shortcut')
         self._hover = False
 
     def enterEvent(self, event):

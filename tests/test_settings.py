@@ -650,7 +650,7 @@ class CheckOneAppTests(_Controlled):
 
     def test_newer_shows_update(self):
         _, _, line, update = self.check('Keytap', self.release('Keytap', '9.0.0'), Path(sys.executable))
-        self.assertIn('Version 9.0.0 available', line)
+        self.assertIn('Version 9.0.0 is available', line)
         self.assertTrue(update)
 
     def test_failure_is_said(self):
@@ -687,7 +687,7 @@ class CheckOneAppTests(_Controlled):
         said "Up to date" whatever its version."""
         exe = Path(sys.executable)          # a real exe with a version stamped in it (Python's: 3.12)
         line, button, offered = self.built_here('Grabbit', exe, self.release('Grabbit', '99.0.0'))
-        self.assertIn('Version 99.0.0 available', line)
+        self.assertIn('Version 99.0.0 is available', line)
         self.assertTrue(button and offered)
 
     def unstamped(self, data: bytes):
@@ -728,7 +728,7 @@ class CheckOneAppTests(_Controlled):
         exe = self.unstamped(b'an older build, no version in it')
         asset = releases.Asset('HomeworkHub.exe', 1, '0' * 64, 'https://example.invalid/h')
         line, button, offered = self.built_here('Homework Hub', exe, releases.Release('HomeworkHub', '1.12.17', '', '', asset))
-        self.assertIn('Version 1.12.17 available', line)
+        self.assertIn('Version 1.12.17 is available', line)
         self.assertTrue(button and offered)
 
 
@@ -1287,7 +1287,7 @@ class PanelTests(_Controlled):
             window._add_website()
             window._pin(program)
             window._pin(program)
-            self.assertEqual(window.pin_note.text(), f'{program.name} is there already.')
+            self.assertEqual(window.pin_note.text(), f'{program.name} is already pinned.')
             self.assertEqual([p.name for p in self.controller.settings.pinned], ['example.com', program.name], 'kept')
             with mock.patch.object(pins, 'open_pin', lambda pin: opened.append(pin.name) or ''), \
                     mock.patch.object(self.controller, 'show_settings', lambda page='': settings_pages.append(page)):
@@ -1461,7 +1461,7 @@ class PanelTests(_Controlled):
             window.show_monitors(['TYPEC', 'DELL G2524H'])
             self.assertEqual(window.monitors_found.text(), 'Found: TYPEC, DELL G2524H.')
             window.show_monitors([])
-            self.assertEqual(window.monitors_found.text(), 'No monitor here answers DDC/CI.')
+            self.assertEqual(window.monitors_found.text(), 'No monitor has DDC/CI turned on.')
             window.brightness_switch.setChecked(False)
             self.assertFalse(self.controller.settings.panel_brightness)
             self.assertTrue(window.monitors_found.isHidden())

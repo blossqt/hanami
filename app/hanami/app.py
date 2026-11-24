@@ -501,10 +501,10 @@ class Controller(QObject):
         if reopen:
             QTimer.singleShot(0, lambda: self._reopen(reopen))
         if updated:
-            self._say('Hanami', f'Hanami was updated to {updated}.', icons.app_icon(), 4000)
+            self._say('Hanami', f'Hanami updated to {updated}.', icons.app_icon(), 4000)
             win32.icon_changed(Path(sys.executable), win32.start_menu() / 'Hanami.lnk')
         elif failed:
-            self._say('Hanami', f'Hanami could not update to {failed}: some of its files were in use.',
+            self._say('Hanami', f'Hanami did not update to {failed}. Some of its files were in use.',
                       icons.app_icon(), 6000)
         self._clear_leftovers()
         threading.Thread(target=self._sweep, name='hanami-sweep', daemon=True).start()
@@ -1097,7 +1097,7 @@ class Controller(QObject):
                 except releases.ReleaseError as error:
                     results[app.name] = str(error)
                 except Exception as error:  # noqa: BLE001 - a bug here must not take Hanami down
-                    results[app.name] = f'The check failed: {error}'
+                    results[app.name] = f'The update check failed: {error}'
             self._versions_with(results, exes)
             self._bridge.checked.emit(results)
 
@@ -1119,7 +1119,7 @@ class Controller(QObject):
             except releases.ReleaseError as error:
                 result = str(error)
             except Exception as error:  # noqa: BLE001 - a bug here must not take Hanami down
-                result = f'The check failed: {error}'
+                result = f'The update check failed: {error}'
             self._versions_with({name: result}, exes)
             self._bridge.app_checked.emit(name, result)
 
@@ -1135,11 +1135,11 @@ class Controller(QObject):
             record = self.settings.installed(name)
             have = str(record.get('version') or '') if record else self.version_of(name, exe)
             if self.update_available(name):
-                note = f'Version {result.version} available.'
+                note = f'Version {result.version} is available.'
             elif exe is None or not have:
                 # not here, or its version not yet told: only what the newest is (never "up to date"
                 # unless it is known to be)
-                note = f'Latest version: {result.version}.'
+                note = f'The latest version is {result.version}.'
             else:
                 note = 'Up to date.'
         else:
@@ -1171,7 +1171,7 @@ class Controller(QObject):
                     and self.settings.told(app.name) != self.latest[app.name].version:
                 self.settings.set_told(app.name, self.latest[app.name].version)
                 if self.settings.notify_updates:
-                    then = (f'It is installed after {app.name} closes.' if self.settings.auto_update
+                    then = (f'It installs when {app.name} closes.' if self.settings.auto_update
                             else 'Open Hanami to update it.')
                     self._say('Hanami', f'{app.name} {self.latest[app.name].version} is available. {then}',
                               icons.app_icon(), 6000)
@@ -1340,7 +1340,7 @@ class Controller(QObject):
         if self.settings_window is None:
             return
         if self._checking:
-            text = 'Looking for updates…'
+            text = 'Checking for updates…'
         elif not self._checked_wall:
             text = 'Not checked yet.' if self.settings.check_updates else 'Updates are checked only on request.'
         else:
@@ -1350,7 +1350,8 @@ class Controller(QObject):
                     if minutes < 60 else f'{hours} hour{"s" if hours != 1 else ""} ago')
             out = self._newer_names()
             found = ('Everything is up to date.' if not out else
-                     f'{out[0]} is out.' if len(out) == 1 else f'{", ".join(out[:-1])} and {out[-1]} are out.')
+                     f'An update is available for {out[0]}.' if len(out) == 1 else
+                     f'Updates are available for {", ".join(out[:-1])} and {out[-1]}.')
             text = f'Checked {when}. {found}'
         self.settings_window.show_checked(text, self._checking)
 
@@ -1396,8 +1397,7 @@ class Controller(QObject):
             return
         if ask:
             answer = QMessageBox.question(
-                self.window, 'Hanami', f'Uninstall {name}?\n\nIts program is removed from this PC; '
-                'its settings and anything it saved are left where they are.')
+                self.window, 'Hanami', f'Uninstall {name}?\n\nIts settings and saved files are kept.')
             if answer != QMessageBox.Yes:
                 return
         job = self.jobs[name] = _Job(name, 'uninstall')
@@ -1464,7 +1464,7 @@ class Controller(QObject):
             except releases.ReleaseError as error:
                 self._bridge.finished.emit(job.name, str(error))
             except Exception as error:  # noqa: BLE001 - shown on the card, never an error box
-                self._bridge.finished.emit(job.name, f'Not installed: {error}')
+                self._bridge.finished.emit(job.name, f'{job.name} was not installed: {error}')
 
         threading.Thread(target=work, name=f'hanami-install-{app.name}', daemon=True).start()
 
@@ -1491,7 +1491,7 @@ class Controller(QObject):
             except releases.ReleaseError as error:
                 self._bridge.finished.emit(job.name, str(error))
             except Exception as error:  # noqa: BLE001
-                self._bridge.finished.emit(job.name, f'Not installed: {error}')
+                self._bridge.finished.emit(job.name, f'{job.name} was not installed: {error}')
 
         threading.Thread(target=work, name=f'hanami-place-{app.name}', daemon=True).start()
 
@@ -1508,7 +1508,7 @@ class Controller(QObject):
             except releases.ReleaseError as error:
                 self._bridge.finished.emit(job.name, str(error))
             except Exception as error:  # noqa: BLE001
-                self._bridge.finished.emit(job.name, f'Not removed: {error}')
+                self._bridge.finished.emit(job.name, f'{job.name} was not removed: {error}')
 
         threading.Thread(target=work, name=f'hanami-remove-{app.name}', daemon=True).start()
 
@@ -1537,7 +1537,7 @@ class Controller(QObject):
             self.settings.set_told(name, version)
             self.problems.pop(name, None)
             self._say('Hanami', f'{name} {version} is installed.' if job.kind == 'install'
-                                  else f'{name} is updated to {version}.', icons.app_icon(), 4000)
+                                  else f'{name} updated to {version}.', icons.app_icon(), 4000)
             if job.restart and not DEV:
                 # A new install opens; an update starts again in the tray, as it was (the user's wish)
                 self.open_app(name, startup=job.kind != 'install')
@@ -1979,8 +1979,7 @@ def main(argv: list[str] | None = None) -> int:
     controller = Controller(startup='--startup' in argv, updated=_after(argv, '--updated'),
                             failed=_after(argv, '--update-failed'), reopen=_after(argv, '--reopen'))
     if not controller.host.listening:
-        QMessageBox.warning(None, 'Hanami', 'Hanami could not open its tray link; the apps will keep '
-                            'their own icons.')
+        QMessageBox.warning(None, 'Hanami', 'The suite tray icon is not available. Each app shows its own tray icon.')
     code = app.exec()
     controller.settings.sync()
     return theme.leave(code)        # a self-update waits for this process to end: it ends here

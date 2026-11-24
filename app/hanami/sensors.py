@@ -36,9 +36,9 @@ STALE = 2.0             # s old, a reading means the service has stopped: it is 
 START_AGAIN = 5.0       # s between tries at starting it
 INSTALLED = Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'Hanami Sensors' / 'HanamiSensors.exe'
 SETUP_ANSWERS = {
-    0: '', 2: 'It needs administrator permission.', 3: 'Its files aren’t as they were built: reinstall Hanami.',
-    4: 'The old one wouldn’t stop: restart Windows and try again.', 5: 'Its files couldn’t be copied.',
-    6: 'Windows wouldn’t register the service.',
+    0: '', 2: 'Administrator permission is required.', 3: 'The setup files are damaged. Reinstall Hanami.',
+    4: 'The existing service did not stop. Restart Windows and try again.',
+    5: 'The service files could not be copied.', 6: 'Windows did not register the service.',
 }
 
 _FILE_MAP_READ, _EVENT_MODIFY_STATE = 0x0004, 0x0002
@@ -229,20 +229,20 @@ def run_setup(action: str) -> str:
     administrator permission - Windows asks first. Waits for it; what went wrong, if anything."""
     setup = bundled_folder() / 'HanamiSensorsSetup.exe'
     if not setup.is_file():
-        return 'Hanami Sensors isn’t in this build of Hanami.'
+        return 'This build of Hanami does not include Hanami Sensors.'
     info = _ShellExecuteInfo()
     info.cbSize = ctypes.sizeof(info)
     info.fMask = 0x00000040 | 0x00000100            # SEE_MASK_NOCLOSEPROCESS, SEE_MASK_NOASYNC
     info.lpVerb, info.lpFile, info.lpParameters = 'runas', str(setup), action
     info.lpDirectory, info.nShow = str(setup.parent), 0
     if not _shell.ShellExecuteExW(ctypes.byref(info)):
-        return '' if ctypes.get_last_error() == _ERROR_CANCELLED else 'Its setup wouldn’t start.'
+        return '' if ctypes.get_last_error() == _ERROR_CANCELLED else 'The setup did not start.'
     if not info.hProcess:
-        return 'Its setup wouldn’t start.'
+        return 'The setup did not start.'
     try:
         _kernel.WaitForSingleObject(info.hProcess, 0xFFFFFFFF)
         code = wintypes.DWORD()
         _kernel.GetExitCodeProcess(info.hProcess, ctypes.byref(code))
     finally:
         _kernel.CloseHandle(info.hProcess)
-    return SETUP_ANSWERS.get(code.value, f'Its setup failed ({code.value}).')
+    return SETUP_ANSWERS.get(code.value, f'The setup failed (code {code.value}).')
