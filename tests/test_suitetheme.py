@@ -904,6 +904,26 @@ class PressTests(unittest.TestCase):
         window.close()
 
 
+class MemoryTests(unittest.TestCase):
+    def test_a_hidden_window_keeps_no_glass_pictures(self):
+        """A settings window, card or panel put away let go of the screen behind it, its cut glass,
+        its bridge and its scaled backdrop - each taken or made again as it shows."""
+        window = QWidget()
+        suitetheme.frost(window)
+        window.show()
+        app.processEvents()
+        for name in suitetheme._HELD_PICTURES:
+            setattr(window, name, QPixmap(400, 300))
+        window.hide()
+        app.processEvents()
+        for name in suitetheme._HELD_PICTURES:
+            self.assertIsNone(getattr(window, name), name)
+        window.show()                                   # and it shows again as it was
+        app.processEvents()
+        self.assertTrue(window.isVisible())
+        window.close()
+
+
 class IconTests(unittest.TestCase):
     def test_one_set(self):
         from hanami.ui import suiteicons
