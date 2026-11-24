@@ -1674,7 +1674,9 @@ class WindowThreadTests(_Controlled):
             started = time.monotonic()
             self.assertEqual(self.controller.version_of('Grabbit', exe), '', 'not known yet')
             self.assertLess(time.monotonic() - started, 0.1, 'not waited for')
-            self._spin(0.7)
+            deadline = time.monotonic() + 3.0     # (a fixed 0.7 s failed now and then with the whole file running)
+            while self.controller.version_of('Grabbit', exe) != '7.7.7' and time.monotonic() < deadline:
+                self._spin(0.1)
             self.assertEqual(self.controller.version_of('Grabbit', exe), '7.7.7', 'known once read')
 
     def test_where_the_sound_goes_is_asked_off_the_windows_thread(self):

@@ -904,6 +904,34 @@ class PressTests(unittest.TestCase):
         window.close()
 
 
+class GlideTests(unittest.TestCase):
+    def test_a_gliding_window_cuts_one_glass_until_it_rests(self):
+        """The edge panel is not repainted as it slides, so every part of it repainted on the way (an
+        icon, the dots) has to get the same glass as the rest: cut for each place as it went, they
+        showed as bands of other glass across it (Hanami 0.1.90)."""
+        from PySide6.QtCore import QPoint
+        window = QWidget(None, Qt.FramelessWindowHint | Qt.Tool)
+        window.resize(140, 380)
+        window.move(600, 200)
+        window.show()
+        app.processEvents()
+        shot = QPixmap(460, 700)
+        shot.fill(QColor('#808080'))
+        painter = QPainter(shot)
+        for y in range(0, 700, 20):
+            painter.fillRect(0, y, 460, 10, QColor('#202020'))
+        painter.end()
+        suitetheme._took(window, shot, window.mapToGlobal(QPoint(-160, -160)), None)   # taken where it rests
+        resting = suitetheme._lens_for(window).toImage()
+        window._suite_gliding = True
+        window.move(700, 211)                   # part way through its slide
+        app.processEvents()
+        self.assertEqual(suitetheme._lens_for(window).toImage(), resting, 'the glass it will have at rest')
+        window._suite_gliding = False
+        self.assertNotEqual(suitetheme._lens_for(window).toImage(), resting, 'and its own place once it stops')
+        window.close()
+
+
 class MemoryTests(unittest.TestCase):
     def test_a_hidden_window_keeps_no_glass_pictures(self):
         """A settings window, card or panel put away let go of the screen behind it, its cut glass,

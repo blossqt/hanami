@@ -1235,6 +1235,12 @@ class EdgePanel(QWidget):
         self._fold_to(False, animate=False)             # folded again for next time
         self._show_tab()
 
+    def _glided(self) -> None:
+        """A slide is over (or stopped part way): painted whole once more, its glass now cut for
+        where it is - it was not repainted as it moved."""
+        self._suite_gliding = False
+        self.update()
+
     def _slide(self, start: QPoint, end: QPoint, ms: int, curve, then=None) -> None:
         theme.stop_animation(self._sliding)
         self._suite_gliding = True
@@ -1249,8 +1255,7 @@ class EdgePanel(QWidget):
         slide.valueChanged.connect(lambda _: self.setWindowOpacity(
             min(1.0, slide.currentTime() / (ms * 0.6)) if coming
             else from_opacity * max(0.0, 1 - slide.currentTime() / ms)))
-        slide.stateChanged.connect(lambda state, _=None: state == slide.State.Stopped
-                                   and setattr(self, '_suite_gliding', False))
+        slide.stateChanged.connect(lambda state, _=None: state == slide.State.Stopped and self._glided())
         if then is not None:
             slide.finished.connect(then)
         else:
