@@ -61,6 +61,7 @@ PROGRESS_EVERY = 0.1             # seconds between an install's progress shown o
 HAND_OVER_EVERY = 30             # seconds between looks at whether Hanami may restart into its update
 LEFTOVER_TRIES = 5, 3            # tries at clearing an update's leftovers away, seconds apart
 ASKED_TOO_LONG = 2000            # ms a connection to Hanami's socket gets to say what it wants
+WARM_SETTINGS_AFTER = 1500       # ms after that: Settings, made the same way (_warm_settings)
 WARM_AFTER = 3000                # ms after Hanami starts: what windows set up the first time they show (_warm_up)
 
 
@@ -339,6 +340,7 @@ class _Bridge(QObject):
     version_read = Signal(str, object, str)   # the app, (its exe, when that was changed), the version stamped in it
     sensors_known = Signal(object, str)       # Hanami Sensors as it is (sensors.State), what went wrong ('' if nothing)
     leftovers_cleared = Signal()
+    sound_done = Signal(object, object, object)   # what to do next, what the sound's work gave, what went wrong
 
 
 NOT_ASKED = 'not asked'
@@ -396,6 +398,50 @@ class _AudioPoll:
                 traceback.print_exc()
 
 
+class _SoundWork:
+    """What changes the sound - the output it goes to, the microphone muted - done on a thread of
+    Hanami's own, in the order asked: moving the sound to another output takes Windows a while
+    (three roles, each told to its audio engine), and on the windows' thread the pop-up and the
+    switch waited for all of it. Each then(result, error) runs back on the windows' thread."""
+
+    def __init__(self, done: Signal):
+        self._done = done
+        self._jobs: queue.SimpleQueue = queue.SimpleQueue()
+        self._pending = 0                   # asked, and its then() not yet run (the windows' thread's alone)
+        done.connect(self._finish)
+        threading.Thread(target=self._run, name='hanami-sound', daemon=True).start()
+
+    def do(self, work, then=None) -> None:
+        self._pending += 1
+        self._jobs.put((work, then))
+
+    def idle(self) -> bool:
+        """Nothing asked is still to be done, or answered (for tests)."""
+        return self._pending == 0
+
+    def _run(self) -> None:
+        while True:
+            work, then = self._jobs.get()
+            result = error = None
+            try:
+                result = work()
+            except OSError as problem:
+                traceback.print_exc()
+                error = problem
+            except Exception as problem:  # noqa: BLE001 - this thread goes on, whatever one job did
+                traceback.print_exc()
+                error = problem
+            try:
+                self._done.emit(then, result, error)
+            except RuntimeError:            # Hanami is closing
+                return
+
+    def _finish(self, then, result, error) -> None:
+        self._pending -= 1
+        if then is not None:
+            then(result, error)
+
+
 class Controller(QObject):
     def __init__(self, startup: bool, updated: str = '', failed: str = '', reopen: str = ''):
         """Started at sign-in (startup), or by an update that just put this version in (updated:
@@ -408,6 +454,7 @@ class Controller(QObject):
         self.host.notified.connect(self._notified)
         self.window: LauncherWindow | None = None
         self.settings_window: SettingsWindow | None = None
+        self._settings_apps: list[str] = []         # the apps it was made listing (_make_settings)
         self._running: set[str] = set()
         self._starting: dict[str, float] = {}     # app: when its card stops saying "Starting…" anyway
         self.latest: dict[str, releases.Release] = {}
@@ -438,6 +485,7 @@ class Controller(QObject):
         self._tray_shape = None                     # what the tray menu was last made of
         self._tray_stale = False                    # it has changed while open: made again once it closes
         self._audio = _AudioPoll(self._bridge.sound_polled.emit)
+        self._sound = _SoundWork(self._bridge.sound_done)
         self._self_update: str | None = None       # the version of Hanami being put in
         self._self_update_asked = False
         self._self_update_failed = failed           # not tried again by itself while this runs
@@ -681,32 +729,32 @@ class Controller(QObject):
 
     def choose_output(self, which: str, say: bool = False) -> None:
         """Send the sound to the speakers or the headphones (opening Settings to choose them if
-        they aren't yet), and show where it went."""
-        try:
-            outputs = audio.outputs()
-        except OSError:
-            outputs = None
-        picked = self.outputs_chosen(outputs).get(which)
+        they aren't yet), and show where it went: the switch lit, and the pop-up (say) up, at once -
+        the move itself is made on the sound's own thread, and a problem with it said once it's known."""
+        picked = self.outputs_chosen().get(which)
         if picked is None:
             self.show_settings('Sound')
             return
-        try:
-            if outputs is None:
-                raise OSError('the outputs could not be listed')
-            if picked[0] in {o.id for o in outputs}:
-                audio.choose(picked[0])
-                said = picked[1]
-            else:
-                said = f'{picked[1]} is not connected'
-                say = True
-        except OSError:
-            traceback.print_exc()
-            said, say = 'The sound output could not be changed', True
+        glyph = HEADPHONES if which == 'headphones' else SPEAKER
         if say:
-            if self.sound_popup is None:
-                self.sound_popup = SoundPopup()
-            self.sound_popup.say(said, HEADPHONES if which == 'headphones' else SPEAKER)
-        self._update_sound()
+            self._say_sound(picked[1], glyph)
+        self._show_sound(picked[0], quick=True)
+        self._sound.do(audio.outputs, lambda outputs, error: self._output_listed(which, outputs, error, say, glyph))
+
+    def _output_listed(self, which: str, outputs, error, say: bool, glyph: str) -> None:
+        """choose_output, once Windows' outputs are known: the one chosen (by its id now - a device's
+        can change), moved to if it is connected."""
+        if error is not None:
+            self._sound_failed(glyph)
+            return
+        picked = self.outputs_chosen(outputs).get(which)
+        if picked is None or picked[0] not in {o.id for o in outputs}:
+            name = picked[1] if picked is not None else ('Headphones' if which == 'headphones' else 'Speakers')
+            self._say_sound(f'{name} is not connected', glyph)
+            self._sound_looked()
+            return
+        self._sound.do(lambda: audio.choose(picked[0]),
+                       lambda _, error: self._sound_failed(glyph) if error is not None else self._sound_looked())
 
     def switch_sound(self) -> None:
         """The hotkey: from the speakers to the headphones, or back - or, without both chosen,
@@ -714,24 +762,39 @@ class Controller(QObject):
         chosen = self.outputs_chosen()
         if chosen['speakers'] and chosen['headphones']:
             try:
-                now = audio.current()
+                now = audio.current()           # a ms or so: only the default output's id
             except OSError:
                 now = ''
             self.choose_output('speakers' if now == chosen['headphones'][0] else 'headphones', say=True)
             return
-        try:
+
+        def work():
             output = audio.next_output([])
             if output is not None:
                 audio.choose(output.id)
-        except OSError:
-            traceback.print_exc()
-            said = 'The sound output could not be changed'
-        else:
-            said = output.name if output is not None else 'There is no other sound output'
+            return output
+
+        def then(output, error):
+            if error is not None:
+                self._sound_failed('')
+                return
+            self._say_sound(output.name if output is not None else 'There is no other sound output')
+            self._sound_looked()
+        self._sound.do(work, then)
+
+    def _say_sound(self, said: str, glyph: str = '') -> None:
         if self.sound_popup is None:
             self.sound_popup = SoundPopup()
-        self.sound_popup.say(said)
-        self._update_sound()
+        self.sound_popup.say(said, glyph)
+
+    def _sound_failed(self, glyph: str) -> None:
+        self._say_sound('The sound output could not be changed', glyph)
+        self._sound_looked()
+
+    def _sound_looked(self) -> None:
+        """Where the sound goes, asked again on the sound's thread - the switches then show it as it is."""
+        if self._sound_toggles() or self.panel.isVisible():
+            self._audio.ask(mic=self.panel.isVisible())
 
     def _sound_toggles(self) -> list:
         return [owner.sound for owner in (self.window, self.panel) if owner is not None and owner.isVisible()]
@@ -756,13 +819,15 @@ class Controller(QObject):
         if volume != NOT_ASKED:
             self.panel.show_volume(volume)
 
-    def _show_sound(self, now: str) -> None:
+    def _show_sound(self, now: str, quick: bool = False) -> None:
+        """The switches lit for that output (an id). Not quick: one not matched is looked for again
+        among Windows' outputs, by name (its id may have changed) - quick, it is lit only as known."""
         toggles = self._sound_toggles()
         if not toggles:
             return
         chosen = self.outputs_chosen()
         side = next((which for which, picked in chosen.items() if picked and picked[0] == now), None)
-        if side is None and now and now != self._unmatched:
+        if side is None and now and now != self._unmatched and not quick:
             self._unmatched = now                       # listed once per output, not every 2 s
             try:
                 chosen = self.outputs_chosen(audio.outputs())   # one chosen may have a new id
@@ -774,14 +839,19 @@ class Controller(QObject):
             toggle.show_output(side, f'Speakers: {names["speakers"]}\nHeadphones: {names["headphones"]}')
 
     def toggle_mic(self) -> None:
-        """The panel's microphone button: muted, or not any more."""
-        try:
-            muted = audio.mic_muted()
-            if muted is not None:
-                audio.mute_mic(not muted)
-        except OSError:
-            traceback.print_exc()
-        self._update_mic()
+        """The panel's microphone button: shown muted, or not any more, at once - and made so on the
+        sound's thread, then shown as Windows has it."""
+        shown = self.panel.mic.muted
+        if shown is None:
+            return
+        wanted = not shown
+        self.panel.show_mic(wanted)
+
+        def work():
+            audio.mute_mic(wanted)
+            return audio.mic_muted()
+        self._sound.do(work, lambda muted, error: self._audio.ask(mic=True) if error is not None
+                       else self.panel.show_mic(muted))
 
     def _update_mic(self) -> None:
         try:
@@ -1638,9 +1708,22 @@ class Controller(QObject):
         window = self._make_window()
         window.winId()
         window.grab()                   # drawn once unseen: its first opening is then 0.2 s quicker
+        QTimer.singleShot(WARM_SETTINGS_AFTER, self._warm_settings)
         if self.settings.text_hotkey_on:
             # Windows' text readers, made off the UI thread: the first screen read took 50 ms more.
             threading.Thread(target=suiteocr.available, daemon=True).start()
+
+    def _warm_settings(self) -> None:
+        """Settings, made and drawn once unseen - a while after the main window, so the two don't
+        come together: it is the largest window, and was the slowest to open the first time."""
+        if theme.quiet_now():
+            QTimer.singleShot(WARM_AFTER, self._warm_settings)
+            return
+        if self.settings_window is not None:
+            return
+        window = self._make_settings()
+        window.winId()
+        window.grab()
 
     def _shortcut_groups(self) -> list:
         """Hanami's keyboard shortcuts, for its sheet (Ctrl+/): the hotkeys as they are set now."""
@@ -1683,45 +1766,58 @@ class Controller(QObject):
         if self.settings.check_updates and self._checked_at and time.monotonic() - self._checked_at > CHECK_AGAIN:
             self.check_releases()
 
+    def _settings_made_with(self) -> tuple:
+        """What Settings is made from: the settings as they are (each changed only in Settings
+        itself, so it shows them as they are), and the apps it lists."""
+        s = self.settings
+        return ((s.start_with, win32.starts_with_windows(),
+                 (s.check_updates, s.notify_updates, s.auto_update, s.update_hanami),
+                 (s.sound_hotkey_on, s.sound_hotkey), s.panel_edge, s.panel_tab,
+                 s.pinned, s.panel_pages, s.panel_brightness,
+                 (s.text_hotkey_on, s.text_hotkey), s.panel_buttons,
+                 s.window_sound, s.panel_hidden),
+                [a.name for a in catalog.SUITE if self.listed(a.name)])
+
+    def _make_settings(self) -> SettingsWindow:
+        """Settings, made if it isn't yet - or made again, while put away, if the apps it lists have
+        changed since (it is made unseen soon after Hanami starts: an app put in later is listed)."""
+        args, apps = self._settings_made_with()
+        window = self.settings_window
+        if window is not None and not window.isVisible() and apps != self._settings_apps:
+            window.deleteLater()
+            window = self.settings_window = None
+        if window is not None:
+            return window
+        self._settings_apps = apps
+        self.settings_window = SettingsWindow(*args, apps=apps)
+        self.settings_window.startup_changed.connect(self._startup_changed)
+        self.settings_window.sound_changed.connect(self._sound_changed)
+        self.settings_window.window_sound_changed.connect(self._window_sound_changed)
+        self.settings_window.text_changed.connect(self._text_changed)
+        self.settings_window.output_chosen.connect(self._output_chosen)
+        self.settings_window.panel_changed.connect(self._panel_changed)
+        self.settings_window.tab_changed.connect(self._tab_changed)
+        self.settings_window.pins_changed.connect(self._pins_changed)
+        self.settings_window.pages_changed.connect(self._pages_changed)
+        self.settings_window.panel_apps_changed.connect(self._panel_apps_changed)
+        self.settings_window.sensors_asked.connect(self._sensors_asked)
+        self.settings_window.brightness_changed.connect(self._brightness_changed)
+        self.settings_window.buttons_changed.connect(self._buttons_changed)
+        self.settings_window.updates_changed.connect(self._updates_changed)
+        self.settings_window.hanami_updates_changed.connect(self._hanami_updates_changed)
+        self.settings_window.check_now.connect(self.check_releases)
+        self.settings_window.update_hanami_now.connect(lambda: self.update_hanami(asked=True))
+        self.settings_window.show_page.connect(self.show_page)
+        self.settings_window.open_url.connect(lambda url: QDesktopServices.openUrl(QUrl(url)))
+        return self.settings_window
+
     def show_settings(self, page: str = '', activate: bool = True) -> None:
-        if self.settings_window is None:
-            s = self.settings
-            self.settings_window = SettingsWindow(s.start_with, win32.starts_with_windows(),
-                                                  (s.check_updates, s.notify_updates, s.auto_update,
-                                                   s.update_hanami),
-                                                  (s.sound_hotkey_on, s.sound_hotkey), s.panel_edge, s.panel_tab,
-                                                  s.pinned, s.panel_pages, s.panel_brightness,
-                                                  (s.text_hotkey_on, s.text_hotkey), s.panel_buttons,
-                                                  s.window_sound, s.panel_hidden,
-                                                  apps=[a.name for a in catalog.SUITE if self.listed(a.name)])
-            self.settings_window.startup_changed.connect(self._startup_changed)
-            self.settings_window.sound_changed.connect(self._sound_changed)
-            self.settings_window.window_sound_changed.connect(self._window_sound_changed)
-            self.settings_window.text_changed.connect(self._text_changed)
-            self.settings_window.output_chosen.connect(self._output_chosen)
-            self.settings_window.panel_changed.connect(self._panel_changed)
-            self.settings_window.tab_changed.connect(self._tab_changed)
-            self.settings_window.pins_changed.connect(self._pins_changed)
-            self.settings_window.pages_changed.connect(self._pages_changed)
-            self.settings_window.panel_apps_changed.connect(self._panel_apps_changed)
-            self.settings_window.sensors_asked.connect(self._sensors_asked)
-            self.settings_window.brightness_changed.connect(self._brightness_changed)
-            self.settings_window.buttons_changed.connect(self._buttons_changed)
-            self.settings_window.updates_changed.connect(self._updates_changed)
-            self.settings_window.hanami_updates_changed.connect(self._hanami_updates_changed)
-            self.settings_window.check_now.connect(self.check_releases)
-            self.settings_window.update_hanami_now.connect(lambda: self.update_hanami(asked=True))
-            self.settings_window.show_page.connect(self.show_page)
-            self.settings_window.open_url.connect(lambda url: QDesktopServices.openUrl(QUrl(url)))
+        self._make_settings()
         if page:
             self.settings_window.open_page(page)
         self._look_at_sensors()
         self.settings_window.show_monitors(None if self._monitors is None else [m.name for m in self._monitors])
-        try:
-            outputs = audio.outputs()
-        except OSError:
-            outputs = []
-        self.settings_window.show_outputs(outputs, self.outputs_chosen(outputs))
+        self._sound.do(audio.outputs, self._settings_outputs)      # Windows' outputs: listed on the sound's thread
         self.settings_window.show_sound_problem(self.sound_problem)
         self.settings_window.show_text_problem(self.text_problem)
         self._show_checked()
@@ -1734,6 +1830,11 @@ class Controller(QObject):
         self.settings_window.show()
         self.settings_window.raise_()
         self.settings_window.activateWindow()
+
+    def _settings_outputs(self, outputs, error) -> None:
+        if self.settings_window is not None:
+            outputs = outputs if error is None else []
+            self.settings_window.show_outputs(outputs, self.outputs_chosen(outputs))
 
     def listed(self, name: str) -> bool:
         """Whether Hanami shows the app: always, or - one only_once_installed - while it is on this

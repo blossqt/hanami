@@ -174,8 +174,17 @@ class _Controlled(unittest.TestCase):
         self.told = []
         self.controller.tray.showMessage = lambda title, body, icon, ms: self.told.append((title, body))
 
+    def settle_sound(self) -> None:
+        """Until what was asked of the sound's own thread is done, and answered here."""
+        until = time.monotonic() + 3
+        while not self.controller._sound.idle() and time.monotonic() < until:
+            qt.processEvents()
+            time.sleep(0.005)
+        self.assertTrue(self.controller._sound.idle(), "the sound's thread answered")
+
     def tearDown(self):
         import winreg
+        self.settle_sound()
         self.controller.hotkeys.clear()
         self.controller._server.close()
         self._monitors.stop()
@@ -281,7 +290,7 @@ class SoundTests(_Controlled):
         self.now = 'ed'
         self._patches = [mock.patch.object(audio, 'outputs', lambda: list(self.outputs)),
                          mock.patch.object(audio, 'current', lambda: self.now),
-                         mock.patch.object(audio, 'choose', self._choose)]
+                         mock.patch.object(audio, 'choose', lambda output_id: self._choose(output_id))]
         for patch in self._patches:
             patch.start()
         self.controller.show_settings = lambda page='': self.asked_settings.append(page)
@@ -314,18 +323,37 @@ class SoundTests(_Controlled):
 
     def test_the_hotkey_goes_between_the_two(self):
         self.controller.switch_sound()
+        self.settle_sound()
         self.assertEqual(self.now, 'hp')
         self.assertEqual(self.controller.sound_popup.name, 'Headphones (Protocol Max)', 'and says where')
         self.controller.switch_sound()
+        self.settle_sound()
         self.assertEqual(self.now, 'ed', 'back, past the two not chosen')
         self.now = 'tc'                                     # changed elsewhere, to neither
         self.controller.switch_sound()
+        self.settle_sound()
+        self.assertEqual(self.now, 'hp')
+
+    def test_the_pop_up_comes_before_the_switch_is_made(self):
+        import threading
+        self.controller.outputs_chosen()
+        held = threading.Event()
+        slow = self._choose
+        self._choose = lambda output_id: (held.wait(3), slow(output_id))
+        try:
+            self.controller.switch_sound()
+            self.assertEqual(self.controller.sound_popup.name, 'Headphones (Protocol Max)', 'said at once')
+            self.assertEqual(self.now, 'ed', 'while Windows is still being told')
+        finally:
+            held.set()
+        self.settle_sound()
         self.assertEqual(self.now, 'hp')
 
     def test_headphones_unplugged(self):
         self.controller.outputs_chosen()
         self.outputs = [o for o in self.outputs if o.id != 'hp']
         self.controller.switch_sound()
+        self.settle_sound()
         self.assertEqual(self.now, 'ed', 'nothing changed')
         self.assertEqual(self.controller.sound_popup.name, 'Headphones (Protocol Max) is not connected')
 
@@ -335,6 +363,7 @@ class SoundTests(_Controlled):
         self.controller.outputs_chosen()
         self.outputs = [self.audio.Output('hp2', o.name) if o.id == 'hp' else o for o in self.outputs]
         self.controller.switch_sound()
+        self.settle_sound()
         self.assertEqual(self.now, 'hp2')
         self.assertEqual(self.controller.sound_popup.name, 'Headphones (Protocol Max)')
         self.assertEqual(self.controller.settings.output('headphones')[0], 'hp2', 'kept from now on')
@@ -342,7 +371,9 @@ class SoundTests(_Controlled):
         self.outputs = [o for o in self.outputs if o.id != 'hp2']
         self.outputs.append(self.audio.Output('hp4', 'Headphones (Protocol Max)'))
         self.controller.switch_sound()                      # (back to the speakers)
+        self.settle_sound()
         self.controller.switch_sound()
+        self.settle_sound()
         self.assertEqual(self.now, 'ed', 'two of that name: not a guess between them')
         self.assertIn('is not connected', self.controller.sound_popup.name)
 
@@ -367,6 +398,7 @@ class SoundTests(_Controlled):
         self.assertEqual(toggle.side, 'speakers', 'lit where the sound goes now')
         self.assertIn('Headphones (Protocol Max)', toggle.toolTip())
         toggle.chosen.emit('headphones')                    # clicked
+        self.settle_sound()
         self.assertEqual((self.now, toggle.side), ('hp', 'headphones'))
         self.assertIsNone(controller.sound_popup, 'no pop-up: the window shows it')
         self.now = 'tc'                                     # changed in Windows' own settings
@@ -399,6 +431,7 @@ class SoundTests(_Controlled):
     def test_without_headphones_the_switch_asks_for_them(self):
         self.outputs = [o for o in self.outputs if o.id != 'hp']
         self.controller.choose_output('headphones')
+        self.settle_sound()
         self.assertEqual(self.asked_settings, ['Sound'])
         self.assertEqual(self.now, 'ed')
 
@@ -1179,8 +1212,11 @@ class PanelTests(_Controlled):
             qt.processEvents()
             self.assertIs(self.panel.mic.muted, False, 'shown as it is')
             self.panel.mic.clicked.emit()
+            self.assertIs(self.panel.mic.muted, True, 'shown muted at once, before Windows is told')
+            self.settle_sound()
             self.assertEqual((state['muted'], self.panel.mic.muted), (True, True), 'muted, and shown so')
             self.panel.mic.clicked.emit()
+            self.settle_sound()
             self.assertEqual((state['muted'], self.panel.mic.muted), (False, False))
             state['muted'] = None
             self.controller._update_mic()
@@ -1711,6 +1747,26 @@ class WindowThreadTests(_Controlled):
         self.assertFalse(controller.window.isVisible() or controller.panel.isVisible(), 'and not shown')
         self.assertIn(('website', 'https://example.com'), controller._pin_icons, 'the pinned icons made')
         controller.settings.pinned = []
+
+    def test_settings_is_made_ready_too_and_made_again_for_a_new_app(self):
+        from unittest import mock
+        controller = self.controller
+        controller._warm_settings()
+        made = controller.settings_window
+        try:
+            self.assertIsNotNone(made)
+            self.assertTrue(made.internalWinId(), 'its own window made')
+            self.assertFalse(made.isVisible(), 'and not shown')
+            controller.show_settings()
+            self.assertIs(controller.settings_window, made, 'the one made ready is the one opened')
+            made.close()
+            listed = controller._settings_apps
+            with mock.patch.object(hanami.Controller, 'listed', lambda self, name: name != listed[0]):
+                controller.show_settings()
+            self.assertIsNot(controller.settings_window, made, 'the apps listed changed: made again')
+        finally:
+            self.settle_sound()
+            controller.settings_window.close()
 
     def test_running_programs_are_seen_coming_and_going(self):
         import subprocess
