@@ -102,8 +102,10 @@ class SuiteTray(QObject):
     # ------------------------------------------------------------------ inside
 
     def _state(self, up: bool) -> None:
+        # `up` is what the link saw when it sent this; the link may have moved on
+        # since (folded in and straight back out), and each change is reported.
         self._update_local()
-        self.in_suite_changed.emit(self.in_suite)
+        self.in_suite_changed.emit(self._shown and up)
 
     def _settle(self) -> None:
         self._settled = True

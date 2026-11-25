@@ -37,7 +37,7 @@ def pump_until(check, seconds=10.0, what='it'):
         if result:
             return result
         time.sleep(0.03)
-    raise AssertionError(f'timed out waiting for {what}')
+    raise AssertionError(f'timed out waiting for {what() if callable(what) else what}')
 
 
 def send(message):
@@ -98,7 +98,8 @@ class SuiteTrayTest(unittest.TestCase):
             send('quit')                                         # Hanami goes: the app's own icon returns
             hanami.wait(10)
             # in, out (hidden), in (shown again), out (Hanami gone)
-            pump_until(lambda: suite == [True, False, True, False], 5, 'the tray to notice')
+            pump_until(lambda: suite == [True, False, True, False], 5,
+                       lambda: f'the tray to notice (in-suite changes: {suite})')
             self.assertTrue(tray._local.isVisible() or not tray._local.isSystemTrayAvailable())
             tray.stop()
         finally:
