@@ -20,6 +20,10 @@ The menu is a list of dicts:
     {'separator': True}
     'default': True on one item makes it bold (what clicking the app's icon does)
 
+The link's thread sleeps until something happens: Hanami sends a click, or the
+app queues a menu or a notification. Nothing is polled, so a click reaches the
+app as soon as Hanami writes it (overlapped pipe I/O and WaitForMultipleObjects).
+
 Callbacks run on the link's own thread; a Qt app should hand them to its UI
 thread (a signal does that).
 
@@ -48,40 +52,70 @@ PIPE_PATH = '\\\\.\\pipe\\' + PIPE_NAME
 VERSION = 1
 
 _kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+
+
+class _Overlapped(ctypes.Structure):
+    _fields_ = [('Internal', ctypes.c_size_t), ('InternalHigh', ctypes.c_size_t),
+                ('Offset', wintypes.DWORD), ('OffsetHigh', wintypes.DWORD), ('hEvent', wintypes.HANDLE)]
+
+
+_LPOVERLAPPED = ctypes.POINTER(_Overlapped)
 _kernel32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
                                   wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
 _kernel32.CreateFileW.restype = wintypes.HANDLE
-_kernel32.PeekNamedPipe.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p,
-                                    ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
-_kernel32.PeekNamedPipe.restype = wintypes.BOOL
 _kernel32.ReadFile.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
-                               ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+                               ctypes.POINTER(wintypes.DWORD), _LPOVERLAPPED]
 _kernel32.ReadFile.restype = wintypes.BOOL
 _kernel32.WriteFile.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
-                                ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+                                ctypes.POINTER(wintypes.DWORD), _LPOVERLAPPED]
 _kernel32.WriteFile.restype = wintypes.BOOL
+_kernel32.GetOverlappedResult.argtypes = [wintypes.HANDLE, _LPOVERLAPPED, ctypes.POINTER(wintypes.DWORD),
+                                          wintypes.BOOL]
+_kernel32.GetOverlappedResult.restype = wintypes.BOOL
+_kernel32.CancelIoEx.argtypes = [wintypes.HANDLE, _LPOVERLAPPED]
+_kernel32.CancelIoEx.restype = wintypes.BOOL
+_kernel32.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+_kernel32.CreateEventW.restype = wintypes.HANDLE
+_kernel32.SetEvent.argtypes = [wintypes.HANDLE]
+_kernel32.SetEvent.restype = wintypes.BOOL
+_kernel32.WaitForMultipleObjects.argtypes = [wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE), wintypes.BOOL,
+                                             wintypes.DWORD]
+_kernel32.WaitForMultipleObjects.restype = wintypes.DWORD
 _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 _kernel32.CloseHandle.restype = wintypes.BOOL
 
 _GENERIC_READ, _GENERIC_WRITE = 0x80000000, 0x40000000
 _OPEN_EXISTING = 3
+_FILE_FLAG_OVERLAPPED = 0x40000000
 _INVALID_HANDLE = wintypes.HANDLE(-1).value
+_INFINITE = 0xFFFFFFFF
+_WAIT_OBJECT_0 = 0
+_ERROR_MORE_DATA, _ERROR_IO_PENDING = 234, 997
+_READ_SIZE = 64 * 1024
 
 
 class SuiteLink:
     def __init__(self, app: str, icon_png: bytes = b'', on_click: Callable[[str], None] | None = None,
                  on_state: Callable[[bool], None] | None = None, poll: float = 0.1, retry: float = 2.0):
+        # poll is kept so older callers still work; nothing is polled any more.
         self.app = app
         self._icon = base64.b64encode(icon_png).decode('ascii') if icon_png else ''
         self._on_click = on_click or (lambda _id: None)
         self._on_state = on_state or (lambda _up: None)
-        self._poll, self._retry = poll, retry
+        self._retry = retry
         self._menu: dict | None = None
         self._outbox: list[str] = []
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # Wakes the link's thread when the app queues something or stops it (auto-reset).
+        self._wake = _kernel32.CreateEventW(None, False, False, None)
         self.connected = False
+
+    def __del__(self):
+        if getattr(self, '_wake', None):
+            _kernel32.CloseHandle(self._wake)
+            self._wake = None
 
     # ------------------------------------------------------------------ the app's side
 
@@ -94,6 +128,7 @@ class SuiteLink:
     def stop(self) -> None:
         """Leave Hanami's menu (on quit, or when the app hides from the tray)."""
         self._stop.set()
+        _kernel32.SetEvent(self._wake)
         if self._thread is not None:
             self._thread.join(2)
             self._thread = None
@@ -105,8 +140,10 @@ class SuiteLink:
             if message == self._menu:
                 return
             self._menu = message
-            if self.connected:
-                self._outbox.append(json.dumps(message))
+            if not self.connected:
+                return
+            self._outbox.append(json.dumps(message))
+        _kernel32.SetEvent(self._wake)
 
     def notify(self, title: str, body: str = '') -> bool:
         """Show a notification from Hanami's icon; False if Hanami isn't there to show it."""
@@ -114,7 +151,8 @@ class SuiteLink:
             if not self.connected:
                 return False
             self._outbox.append(json.dumps({'t': 'notify', 'title': title, 'body': body}))
-            return True
+        _kernel32.SetEvent(self._wake)
+        return True
 
     # ------------------------------------------------------------------ the link's thread
 
@@ -122,7 +160,7 @@ class SuiteLink:
         while not self._stop.is_set():
             try:
                 handle = _kernel32.CreateFileW(PIPE_PATH, _GENERIC_READ | _GENERIC_WRITE, 0, None,
-                                               _OPEN_EXISTING, 0, None)
+                                               _OPEN_EXISTING, _FILE_FLAG_OVERLAPPED, None)
                 if not handle or handle == _INVALID_HANDLE:
                     self._stop.wait(self._retry)            # Hanami isn't running (yet)
                     continue
@@ -148,27 +186,52 @@ class SuiteLink:
             self._outbox = [json.dumps(hello)] + ([json.dumps(self._menu)] if self._menu else [])
             self.connected = True
         self._call(self._on_state, True)
+        read_event = _kernel32.CreateEventW(None, True, False, None)
+        write_event = _kernel32.CreateEventW(None, True, False, None)
+        if not read_event or not write_event:
+            for event in (read_event, write_event):
+                if event:
+                    _kernel32.CloseHandle(event)
+            return
+        chunk = ctypes.create_string_buffer(_READ_SIZE)
+        reading = _Overlapped(hEvent=read_event)
+        pending = False
+        waits = (wintypes.HANDLE * 2)(read_event, self._wake)
         buffer = b''
-        while not self._stop.is_set():
-            with self._lock:
-                outgoing, self._outbox = self._outbox, []
-            for line in outgoing:
-                if not _write(handle, (line + '\n').encode('utf-8')):
-                    return
-            waiting = wintypes.DWORD()
-            if not _kernel32.PeekNamedPipe(handle, None, 0, None, ctypes.byref(waiting), None):
-                return                                  # Hanami went away
-            if waiting.value:
-                chunk = ctypes.create_string_buffer(waiting.value)
+        try:
+            while not self._stop.is_set():
+                with self._lock:
+                    outgoing, self._outbox = self._outbox, []
+                for line in outgoing:
+                    if not _write(handle, (line + '\n').encode('utf-8'), write_event):
+                        return
+                if not pending:
+                    if not _kernel32.ReadFile(handle, chunk, _READ_SIZE, None, ctypes.byref(reading)) \
+                            and ctypes.get_last_error() not in (_ERROR_IO_PENDING, _ERROR_MORE_DATA):
+                        return                          # Hanami went away
+                    pending = True                      # done now or later, read_event says when
+                woke = _kernel32.WaitForMultipleObjects(2, waits, False, _INFINITE)
+                if woke != _WAIT_OBJECT_0:
+                    if woke == _WAIT_OBJECT_0 + 1:
+                        continue                        # the app queued something, or stop()
+                    return                              # the wait itself failed
                 got = wintypes.DWORD()
-                if not _kernel32.ReadFile(handle, chunk, waiting.value, ctypes.byref(got), None):
+                ok = _kernel32.GetOverlappedResult(handle, ctypes.byref(reading), ctypes.byref(got), False)
+                pending = False
+                if not ok and ctypes.get_last_error() != _ERROR_MORE_DATA:
+                    return                              # Hanami went away
+                if not got.value and not ok:
                     return
                 buffer += chunk.raw[:got.value]
                 while b'\n' in buffer:
                     line, buffer = buffer.split(b'\n', 1)
                     self._received(line)
-            else:
-                self._stop.wait(self._poll)
+        finally:
+            if pending:                                 # the kernel must be done with chunk first
+                _kernel32.CancelIoEx(handle, ctypes.byref(reading))
+                _kernel32.GetOverlappedResult(handle, ctypes.byref(reading), ctypes.byref(wintypes.DWORD()), True)
+            _kernel32.CloseHandle(read_event)
+            _kernel32.CloseHandle(write_event)
 
     def _received(self, line: bytes) -> None:
         try:
@@ -187,8 +250,12 @@ class SuiteLink:
             traceback.print_exc()
 
 
-def _write(handle, data: bytes) -> bool:
+def _write(handle, data: bytes, event) -> bool:
     written = wintypes.DWORD()
     view = ctypes.create_string_buffer(data, len(data))
-    return bool(_kernel32.WriteFile(handle, view, len(data), ctypes.byref(written), None)) \
+    writing = _Overlapped(hEvent=event)
+    if not _kernel32.WriteFile(handle, view, len(data), None, ctypes.byref(writing)) \
+            and ctypes.get_last_error() != _ERROR_IO_PENDING:
+        return False
+    return bool(_kernel32.GetOverlappedResult(handle, ctypes.byref(writing), ctypes.byref(written), True)) \
         and written.value == len(data)
