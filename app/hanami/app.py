@@ -34,8 +34,8 @@ from PySide6.QtGui import QAction, QDesktopServices, QFont, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
-from . import (APP_NAME, __version__, audio, brightness, catalog, installer, releases, sensors, suitelog, suiteocr,
-               win32)
+from . import (APP_NAME, __version__, audio, brightness, catalog, feel, installer, releases, sensors, suitelog,
+               suiteocr, win32)
 from .host import TrayHost
 from .hotkeys import Hotkeys, HotkeyError, normalize
 from .stats import Sampler
@@ -717,10 +717,15 @@ class Controller(QObject):
         self.sound_problem, self.text_problem = problems.get('sound', ''), problems.get('text', '')
 
     def _hotkey(self, action: str) -> None:
+        waited = feel.hotkey_waited()           # (only while Windows' hotkey message is being handled)
         if action == 'sound':
             self.switch_sound()
+            feel.pressed('sound', self.sound_popup, waited)
         elif action == 'text':
+            opening = not self.screen_text.is_open
             self.copy_screen_text()
+            if opening and self.screen_text.shades:
+                feel.pressed('screen text', self.screen_text.shades[0], waited)
 
     def copy_screen_text(self) -> None:
         """The screens frozen, to choose text on them and copy it (ui/screentext.py) - or, open
@@ -917,6 +922,7 @@ class Controller(QObject):
 
     def _fill_panel(self) -> None:
         """The panel's apps, its shortcuts and its sound switch."""
+        feel.pressed('panel', self.panel)           # from its coming out to its first frame
         self._show_panel_apps()
         self.panel.show_pins([(pin.name, self._pin_icon(pin)) for pin in self.settings.pinned])
         if 'stats' in self.settings.panel_pages:
@@ -1805,6 +1811,8 @@ class Controller(QObject):
         return self.window
 
     def show_window(self) -> None:
+        if self.window is None or not self.window.isVisible():
+            feel.pressed('window', self._make_window())
         self._make_window()
         self._update_window()
         self.window.show()
@@ -1860,6 +1868,8 @@ class Controller(QObject):
         return self.settings_window
 
     def show_settings(self, page: str = '', activate: bool = True) -> None:
+        if self.settings_window is None or not self.settings_window.isVisible():
+            feel.pressed('settings', self._make_settings())
         self._make_settings()
         if page:
             self.settings_window.open_page(page)

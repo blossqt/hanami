@@ -1153,6 +1153,7 @@ class EdgePanel(QWidget):
             return
         if self._resting_since is None:
             self._resting_since = now
+            self._prepare(screen)
         elif now - self._resting_since >= DWELL and self.allowed():
             self._resting_since = None
             self.slide_out(screen)
@@ -1195,6 +1196,15 @@ class EdgePanel(QWidget):
         g = screen.geometry()
         self.place = max(0.0, min(1.0, (self.y() + self.height() / 2 - g.top()) / g.height()))
         self.moved.emit(self.place)
+
+    def _prepare(self, screen: QRect) -> None:
+        """The pointer has come to rest at the edge: its glass made now, on the glass's own thread,
+        for where it will come out - so coming out, it doesn't first take the screen behind it and
+        soften it. The tab, gone by then, is healed out of it."""
+        self.adjustSize()
+        rest, _ = self._places(screen)
+        hidden = self.tab.frameGeometry() if self.tab.isVisible() else None
+        theme.prepare_glass(self, QRect(rest, self.size()), hidden)
 
     def slide_out(self, screen: QRect) -> None:
         self.showing.emit()
