@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 WORK = Path(tempfile.mkdtemp(prefix='hanami-settings-'))
-os.environ.update(QT_QPA_PLATFORM='offscreen', HANAMI_SETTINGS=str(WORK / 'hanami.ini'),
+os.environ.update(QT_QPA_PLATFORM='offscreen', HANAMI_SETTINGS=str(WORK / 'hanami.ini'), HANAMI_FEEL_LOG=str(WORK / 'feel.log'),
                   HANAMI_INSTANCE='hanami-settings-test', HANAMI_PIPE='hanami-tray-settings-test')
 os.environ.pop('HANAMI_DEV', None)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
