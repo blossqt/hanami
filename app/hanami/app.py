@@ -1719,8 +1719,8 @@ class Controller(QObject):
         if theme.quiet_now():
             QTimer.singleShot(WARM_AFTER, self._warm_settings)
             return
-        if self.settings_window is not None:
-            return
+        if self.settings_window is not None or not self._server.isListening():
+            return                      # made already - or this Hanami is going (its server closed)
         window = self._make_settings()
         window.winId()
         window.grab()
