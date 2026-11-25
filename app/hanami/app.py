@@ -341,6 +341,7 @@ class _Bridge(QObject):
     sensors_known = Signal(object, str)       # Hanami Sensors as it is (sensors.State), what went wrong ('' if nothing)
     leftovers_cleared = Signal()
     sound_done = Signal(object, object, object)   # what to do next, what the sound's work gave, what went wrong
+    programs_scanned = Signal(object, bool)   # what runs (win32.running_programs), and whether to look at the sound too
 
 
 NOT_ASKED = 'not asked'
@@ -440,6 +441,32 @@ class _SoundWork:
         self._pending -= 1
         if then is not None:
             then(result, error)
+class _ProcessPoll:
+    """What runs, looked at on a thread of Hanami's own: a process started since the last look
+    costs it a few ms to read, which on the windows' thread was a stutter in whatever was moving on
+    screen, every 2 s. One look waits at most; one asked with the sound wins over one without."""
+
+    def __init__(self, answer):
+        self._answer = answer
+        self._asked: queue.Queue = queue.Queue(maxsize=1)
+        self._sound = False                 # the waiting look is to look at the sound too
+        threading.Thread(target=self._run, name='hanami-programs', daemon=True).start()
+
+    def ask(self, sound: bool = False) -> None:
+        self._sound = self._sound or sound
+        try:
+            self._asked.put_nowait(None)
+        except queue.Full:
+            pass                            # one is waiting already
+
+    def _run(self) -> None:
+        while True:
+            self._asked.get()
+            sound, self._sound = self._sound, False
+            try:
+                self._answer(win32.running_programs(), sound)
+            except Exception:  # noqa: BLE001 - this thread goes on, whatever one look did
+                traceback.print_exc()
 
 
 class Controller(QObject):
@@ -486,6 +513,8 @@ class Controller(QObject):
         self._tray_stale = False                    # it has changed while open: made again once it closes
         self._audio = _AudioPoll(self._bridge.sound_polled.emit)
         self._sound = _SoundWork(self._bridge.sound_done)
+        self._bridge.programs_scanned.connect(self._running_seen)
+        self._programs = _ProcessPoll(self._bridge.programs_scanned.emit)
         self._self_update: str | None = None       # the version of Hanami being put in
         self._self_update_asked = False
         self._self_update_failed = failed           # not tried again by itself while this runs
@@ -592,12 +621,12 @@ class Controller(QObject):
             # Its card says so until it is seen running (_refresh), or for STARTING_FOR at most.
             self._starting[name] = time.monotonic() + STARTING_FOR
             self._update_window()
-            QTimer.singleShot(STARTING_FOR * 1000 + 100, self._refresh)
-        QTimer.singleShot(1500, self._refresh)
+            QTimer.singleShot(STARTING_FOR * 1000 + 100, self._refresh_soon)
+        QTimer.singleShot(1500, self._refresh_soon)
 
     def quit_app(self, name: str) -> None:
         self.host.click(name, 'quit')
-        QTimer.singleShot(1500, self._refresh)
+        QTimer.singleShot(1500, self._refresh_soon)
 
     def _start_chosen(self) -> None:
         """Start the apps chosen to start with Hanami that aren't running yet, in the background."""
@@ -611,13 +640,20 @@ class Controller(QObject):
 
     def _poll_tick(self) -> None:
         """Every 2 s: what runs - and, while a sound switch or the panel is in sight, where the
-        sound goes and whether the microphone is muted, asked on a thread of their own."""
-        self._refresh(sound=False)
+        sound goes and whether the microphone is muted, asked on threads of their own."""
+        self._programs.ask(sound=False)
         if self._sound_toggles() or self.panel.isVisible():
             self._audio.ask(mic=self.panel.isVisible())
 
+    def _refresh_soon(self) -> None:
+        """_refresh, with what runs looked at on its own thread - for when nothing waits on the answer."""
+        self._programs.ask(sound=True)
+
     def _refresh(self, sound: bool = True) -> None:
-        programs = win32.running_programs()
+        """What runs, looked at here and now - for whatever asks is_running right after."""
+        self._running_seen(win32.running_programs(), sound)
+
+    def _running_seen(self, programs: set[str], sound: bool = True) -> None:
         running = set()
         for app in catalog.SUITE:
             exe = self.settings.exe(app.name)
