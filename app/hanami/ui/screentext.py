@@ -32,7 +32,7 @@ from .. import suiteocr
 from . import theme
 
 DIM = 0.32              # how dark the screen goes behind the choosing
-APPEAR_MS = 220
+APPEAR_MS = 150
 SPIN_MS = 2200          # once round the glowing edge, while the screen is read
 NEAR = 4                # px: a press this close to a word starts choosing text, not drawing
 CLICK = 6               # px: a stroke shorter than this is a click
@@ -528,7 +528,7 @@ class ScreenText(QObject):
         for shade in self.shades:
             shade.note = 'Copied' if shade.chosen else ''
             shade.update()
-        QTimer.singleShot(450 if theme.motion_on() else 0, self.close)
+        QTimer.singleShot(250 if theme.motion_on() else 0, self.close)
 
     def search(self) -> None:
         text = ' '.join(self.text().split())
