@@ -315,6 +315,36 @@ class ShadeTests(unittest.TestCase):
         self.assertEqual(opened, ['https://www.google.com/search?q=Invoice+A-7731+due+Total+%241%2C249.50'])
         self.assertFalse(self.screen_text.is_open)
 
+    def test_frozen_again_it_is_the_same_window_as_new(self):
+        # Its window made once: frozen again, the shade put away last time comes back, with
+        # nothing of last time's text or choice.
+        self.shade.choose_all()
+        first = self.shade
+        self.screen_text.close()
+        spin(lambda: not first.isVisible(), 1.0)
+        self.assertFalse(first.isVisible(), 'put away')
+        self.assertTrue(first.picture.isNull(), "and last time's picture let go")
+        screen = QGuiApplication.primaryScreen()
+        self.screen_text.open({screen: self.picture})
+        again = self.screen_text.shades[0]
+        self.assertIs(again, first, 'the same window')
+        self.assertTrue(again.isVisible())
+        self.assertEqual((again.words, again.chosen, again.note), ([], [], ''), 'nothing of last time')
+        self.assertTrue(again.reading, 'read afresh')
+        self.assertFalse(again.actions_bar.isVisibleTo(again))
+        self.assertFalse(again.picture.isNull())
+
+    def test_what_is_read_for_an_earlier_time_is_let_go(self):
+        screen_text = self.screen_text
+        earlier = screen_text._opening
+        screen_text.close()
+        spin(lambda: not self.shade.isVisible(), 1.0)
+        screen_text.open({QGuiApplication.primaryScreen(): self.picture})
+        shade = screen_text.shades[0]
+        screen_text._read((shade, earlier), [Line((Word('Stale', 60, 170, 70, 20),))], True)
+        self.assertEqual(shade.words, [], 'not shown on this time\'s screen')
+        self.assertTrue(shade.reading)
+
     def test_painted_with_its_choice(self):
         self.shade.choose_all()
         self.shade.resize(1200, 600)

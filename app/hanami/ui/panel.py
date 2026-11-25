@@ -56,9 +56,9 @@ LEVELS = 'sliders'           # the suite's icon of two sliders, for the volume a
 WHEEL_STEP = 2          # % a slider moves for each notch of the scroll wheel over it
 MARGIN = 10           # between the panel and the screen's edge
 NEAR = 24               # px in from the screen's edge that count as at it
-DWELL = 0.3             # s the pointer rests at the edge before the panel comes out
+DWELL = 0.15            # s the pointer rests at the edge before the panel comes out
 LEAVE = 0.45            # s after the pointer leaves it before it slides away
-WATCH_MS = 60
+WATCH_MS = 30
 TAB_LOOK = 76, 5, 30    # the tab as it comes: its length and thickness (px), how opaque at rest (%)
 TAB_LIMITS = (40, 240), (3, 12), (10, 100)
 TAB_EVERY = 0.4         # s between looks at whether the tab should show, and where
@@ -1153,6 +1153,7 @@ class EdgePanel(QWidget):
             return
         if self._resting_since is None:
             self._resting_since = now
+            self._prepare(screen)
         elif now - self._resting_since >= DWELL and self.allowed():
             self._resting_since = None
             self.slide_out(screen)
@@ -1196,6 +1197,15 @@ class EdgePanel(QWidget):
         self.place = max(0.0, min(1.0, (self.y() + self.height() / 2 - g.top()) / g.height()))
         self.moved.emit(self.place)
 
+    def _prepare(self, screen: QRect) -> None:
+        """The pointer has come to rest at the edge: its glass made now, on the glass's own thread,
+        for where it will come out - so coming out, it doesn't first take the screen behind it and
+        soften it. The tab, gone by then, is healed out of it."""
+        self.adjustSize()
+        rest, _ = self._places(screen)
+        hidden = self.tab.frameGeometry() if self.tab.isVisible() else None
+        theme.prepare_glass(self, QRect(rest, self.size()), hidden)
+
     def slide_out(self, screen: QRect) -> None:
         self.showing.emit()
         self.tab.hide()
@@ -1210,7 +1220,7 @@ class EdgePanel(QWidget):
         self.move(rest)                             # unseen at its place first, so its glass takes what is behind it
         self.setWindowOpacity(0.0)
         self.show()
-        self._slide(start, rest, 260, QEasingCurve.OutCubic)
+        self._slide(start, rest, 180, QEasingCurve.OutCubic)
 
     def slide_away(self) -> None:
         if not self.isVisible() or self._leaving:
@@ -1226,7 +1236,7 @@ class EdgePanel(QWidget):
             self._show_tab()
             return
         _, away = self._places(screen.geometry())
-        self._slide(self.pos(), QPoint(away.x(), self.y()), 200, QEasingCurve.InCubic, then=self._gone)
+        self._slide(self.pos(), QPoint(away.x(), self.y()), 160, QEasingCurve.InCubic, then=self._gone)
 
     def _gone(self) -> None:
         self.hide()

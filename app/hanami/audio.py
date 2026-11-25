@@ -10,6 +10,8 @@ use, undocumented but unchanged since Windows 7 - for all three of its roles
 from __future__ import annotations
 
 import ctypes
+import threading
+import time
 from ctypes import wintypes
 from dataclasses import dataclass
 
@@ -320,3 +322,129 @@ def mute_mic(muted: bool) -> None:
                 _release(device)
     finally:
         _release(enumerator)
+
+
+# --------------------------------------------------------------------------- told of changes
+
+# Windows tells whoever asks when the sound moves to another output, an output or microphone comes
+# or goes (IMMNotificationClient), or an output's volume or a microphone's mute changes - from the
+# keyboard's volume keys, Windows' own flyout, another app (IAudioEndpointVolumeCallback). Hanami
+# then looks again at once, rather than at its next look, up to 2 s later. The two are COM objects
+# of Hanami's own, made here with ctypes: a vtable of callbacks, each told on a thread of Windows'.
+
+IID_IUnknown = GUID.of('00000000-0000-0000-C000-000000000046')
+IID_IMMNotificationClient = GUID.of('7991EEC9-7E89-4D85-8390-6C703CEC60C0')
+IID_IAudioEndpointVolumeCallback = GUID.of('657804FA-D6AD-4496-8A60-352752AF4F89')
+_S_OK, _E_NOINTERFACE = 0, -2147467262          # 0x80004002, as a signed HRESULT
+
+_QueryInterface = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.POINTER(GUID),
+                                     ctypes.POINTER(ctypes.c_void_p))
+_Count = ctypes.WINFUNCTYPE(wintypes.ULONG, ctypes.c_void_p)
+_OnText = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, wintypes.LPCWSTR)
+_OnState = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, wintypes.LPCWSTR, wintypes.DWORD)
+_OnDefault = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_int, ctypes.c_int, wintypes.LPCWSTR)
+# OnPropertyValueChanged's PROPERTYKEY (20 bytes) goes by value - on x64, as a pointer to a copy
+_OnProperty = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, wintypes.LPCWSTR, ctypes.c_void_p)
+_OnNotify = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p)
+
+
+class _ComObject:
+    """A COM object of Hanami's own: its interface pointer (pointer), its methods the callbacks
+    given after IUnknown's. It lives as long as Hanami, so it counts no references."""
+
+    def __init__(self, iid: GUID, *methods):
+        def query(this, riid, out):
+            asked = bytes(riid.contents)
+            if asked in (bytes(IID_IUnknown), bytes(iid)):
+                out[0] = this
+                return _S_OK
+            out[0] = None
+            return _E_NOINTERFACE
+        self._functions = (_QueryInterface(query), _Count(lambda this: 1), _Count(lambda this: 1), *methods)
+        self._vtable = (ctypes.c_void_p * len(self._functions))(
+            *[ctypes.cast(f, ctypes.c_void_p) for f in self._functions])
+        self._object = ctypes.c_void_p(ctypes.addressof(self._vtable))
+        self.pointer = ctypes.c_void_p(ctypes.addressof(self._object))
+
+
+class Watcher:
+    """Calls changed() - on a thread of Windows', so it must only hand the news on - whenever the
+    sound moves, an output or microphone comes or goes, or a volume or mute changes. It listens to
+    the output's volume and the microphones' on a thread of its own, and to new ones each time the
+    defaults change."""
+
+    def __init__(self, changed):
+        self._changed = changed
+        self._again = threading.Event()         # the defaults changed: listen to the new ones
+        self._again.set()
+        self.client = _ComObject(IID_IMMNotificationClient,
+                                 _OnState(lambda this, device, state: self._moved()),
+                                 _OnText(lambda this, device: self._moved()),
+                                 _OnText(lambda this, device: self._moved()),
+                                 _OnDefault(lambda this, flow, role, device: self._moved()),
+                                 _OnProperty(lambda this, device, key: _S_OK))
+        self.volume_callback = _ComObject(IID_IAudioEndpointVolumeCallback, _OnNotify(lambda this, data: self._tell()))
+        self.thread = threading.Thread(target=self._run, name='hanami-sound-watch', daemon=True)
+        self.thread.start()
+
+    def _tell(self) -> int:
+        try:
+            self._changed()
+        except Exception:  # noqa: BLE001 - never raised into Windows' thread
+            pass
+        return _S_OK
+
+    def _moved(self) -> int:
+        self._again.set()
+        return self._tell()
+
+    def _run(self) -> None:
+        ole32.CoInitializeEx(None, 0x0)             # multithreaded: Windows calls back on threads of its own
+        try:
+            enumerator = _create(CLSID_MMDeviceEnumerator, IID_IMMDeviceEnumerator)
+            _call(enumerator, 6, self.client.pointer, argtypes=(ctypes.c_void_p,))   # RegisterEndpointNotificationCallback
+        except OSError:
+            return                                  # not told, then: Hanami's looks every 2 s go on
+        listened: list[ctypes.c_void_p] = []
+        while True:
+            self._again.wait()
+            time.sleep(0.05)                        # the three roles' changes come together: listened to once
+            self._again.clear()
+            for endpoint in listened:
+                try:
+                    _call(endpoint, 4, self.volume_callback.pointer, argtypes=(ctypes.c_void_p,))   # Unregister...
+                except OSError:
+                    pass
+                _release(endpoint)
+            listened = []
+            try:
+                endpoint = _output_volume(enumerator)
+                devices = _microphones(enumerator)
+            except OSError:
+                endpoint, devices = None, []
+            try:
+                endpoints = ([endpoint] if endpoint is not None else []) + [_volume(d) for d in devices]
+            except OSError:
+                endpoints = [endpoint] if endpoint is not None else []
+            finally:
+                for device in devices:
+                    _release(device)
+            for each in endpoints:
+                try:
+                    _call(each, 3, self.volume_callback.pointer, argtypes=(ctypes.c_void_p,))   # RegisterControlChangeNotify
+                    listened.append(each)
+                except OSError:
+                    _release(each)
+
+
+_watcher: Watcher | None = None
+_listeners: list = []
+
+
+def watch(changed) -> None:
+    """changed() - on a thread of Windows' - whenever the sound changes elsewhere (Watcher). One
+    Watcher, however many listen."""
+    global _watcher
+    _listeners.append(changed)
+    if _watcher is None:
+        _watcher = Watcher(lambda: [listener() for listener in list(_listeners)])

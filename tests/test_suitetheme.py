@@ -21,7 +21,7 @@ for name in ('SUITE_LOOK', 'SUITE_MODE', 'SUITE_MOTION'):
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
 
 from PySide6.QtCore import QEventLoop, QPoint, QRect, QRectF, QSize, Qt, QTimer  # noqa: E402
-from PySide6.QtGui import QColor, QFont, QPainter, QPixmap  # noqa: E402
+from PySide6.QtGui import QColor, QFont, QPainter, QPixmap, QScreen  # noqa: E402
 from PySide6.QtWidgets import (QApplication, QCheckBox, QLineEdit, QPushButton, QStyle, QToolButton,  # noqa: E402
                                QVBoxLayout, QWidget)
 
@@ -395,6 +395,69 @@ class LensTests(unittest.TestCase):
             loop.exec()
             self.assertEqual(came, [QSize(4, 4)], 'taken on its own thread, handed back on this one')
             self.assertTrue(grabber.take('a', QRect(0, 0, 4, 4), 1.0, lambda image: None, lambda made: None))
+
+
+class PreparedGlassTests(unittest.TestCase):
+    """A pop-up's glass made ahead, for where it is about to open (the edge panel, as the pointer
+    rests at the edge): it opens with it, taking no shot of the screen as it shows."""
+
+    def setUp(self):
+        from PySide6.QtGui import QImage
+        self.window = QWidget(None, Qt.FramelessWindowHint | Qt.Tool)
+        suitetheme.frost(self.window, fade=False)
+        self.frame = QRect(300, 200, 200, 120)
+        red = QImage(8, 8, QImage.Format_RGB32)
+        red.fill(QColor('#ff0000'))
+        self.grabs = []
+        self._patches = [mock.patch.object(suitetheme, 'glass_on', lambda: True),
+                         mock.patch.object(suitetheme, '_screen_image', lambda r: red.scaled(r.width(), r.height())),
+                         mock.patch.object(suitetheme, '_drag_images', lambda native: []),
+                         mock.patch.object(QScreen, 'grabWindow', lambda screen, *a: self.grabs.append(a) or QPixmap())]
+        for patch in self._patches:
+            patch.start()
+
+    def tearDown(self):
+        for patch in self._patches:
+            patch.stop()
+
+    def _made_ahead(self):
+        suitetheme.prepare_glass(self.window, self.frame, hidden=QRect(300, 240, 6, 40))
+        loop = QEventLoop()
+        timer = QTimer(interval=10)
+        timer.timeout.connect(lambda: getattr(self.window, '_suite_prepared', None) is not None and loop.quit())
+        timer.start()
+        QTimer.singleShot(3000, loop.quit)
+        loop.exec()
+        timer.stop()
+        self.assertIsNotNone(getattr(self.window, '_suite_prepared', None), 'made on the glass\'s thread')
+
+    def test_it_opens_with_the_glass_made_ahead(self):
+        self._made_ahead()
+        self.window.setGeometry(self.frame)
+        suitetheme._capture(self.window)
+        self.assertEqual(self.grabs, [], 'no shot taken as it shows')
+        self.assertIsNotNone(self.window._suite_shot)
+        self.assertGreater(self.window._suite_shot.toImage().pixelColor(4, 4).red(), 200, 'what was behind')
+        self.assertIsNone(self.window._suite_prepared, 'and let go')
+
+    def test_made_for_somewhere_else_it_is_not_used(self):
+        self._made_ahead()
+        self.window.setGeometry(self.frame.translated(0, 300))
+        suitetheme._capture(self.window)
+        self.assertEqual(len(self.grabs), 1, 'the screen taken as it shows, as before')
+
+    def test_made_too_long_before_it_is_not_used(self):
+        self._made_ahead()
+        asked, want, made = self.window._suite_prepared
+        self.window._suite_prepared = (asked - suitetheme._PREPARED_FOR - 0.1, want, made)
+        self.window.setGeometry(self.frame)
+        suitetheme._capture(self.window)
+        self.assertEqual(len(self.grabs), 1)
+
+    def test_not_during_a_game(self):
+        with mock.patch.object(suitetheme, 'quiet_now', lambda: True):
+            suitetheme.prepare_glass(self.window, self.frame)
+        self.assertIsNone(getattr(self.window, '_suite_prepared', None))
 
 
 class RimTests(unittest.TestCase):
