@@ -46,7 +46,7 @@ def _word_rect(word, ratio: float) -> QRectF:
 
 class _Reader(QObject):
     """suiteocr.recognize on a thread of its own, one screen after another (Windows reads one
-    picture at a time), the one under the pointer first; read(shade, lines, done) back here -
+    picture at a time), the one under the pointer first; read(what, lines, done) back here -
     the first language's words early, then all of them."""
     read = Signal(object, object, bool)
 
@@ -91,14 +91,26 @@ class _Shade(QWidget):
     def __init__(self, owner, screen, picture: QPixmap):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.owner = owner
-        self.setAttribute(Qt.WA_DeleteOnClose)
         self.setAttribute(Qt.WA_OpaquePaintEvent)
         self.setWindowTitle('Copy text from the screen')
-        self.setScreen(screen)
-        self.setGeometry(screen.geometry())
         self.setMouseTracking(True)
         self.setCursor(Qt.CrossCursor)
         self.setFocusPolicy(Qt.StrongFocus)
+        self.actions_bar = _Actions(self)
+        self._fade = QVariantAnimation(self, startValue=0.0, endValue=1.0, duration=APPEAR_MS)
+        self._fade.valueChanged.connect(self._appeared)
+        self._spin = QTimer(self, interval=16)
+        self._spin.timeout.connect(self._turn)
+        self.prepare(screen, picture)
+
+    def prepare(self, screen, picture: QPixmap) -> None:
+        """Ready for a screen's picture, as new - each time the screens are frozen. A shade is kept,
+        hidden, between times (ScreenText.put_away), its window made once rather than each time."""
+        self._fade.stop()
+        self._spin.stop()
+        self.setScreen(screen)
+        if self.geometry() != screen.geometry():
+            self.setGeometry(screen.geometry())
         self.picture = picture
         self.ratio = max(0.1, picture.width() / max(1, screen.geometry().width()))
         self._dimmed = self._dim(picture)
@@ -116,11 +128,7 @@ class _Shade(QWidget):
         self.note = ''                   # 'Copied', briefly, before closing
         self._appear = 0.0
         self._phase = 0.0
-        self.actions_bar = _Actions(self)
-        self._fade = QVariantAnimation(self, startValue=0.0, endValue=1.0, duration=APPEAR_MS)
-        self._fade.valueChanged.connect(self._appeared)
-        self._spin = QTimer(self, interval=16)
-        self._spin.timeout.connect(self._turn)
+        self.actions_bar.hide()
 
     @staticmethod
     def _dim(picture: QPixmap) -> QPixmap:
@@ -472,6 +480,8 @@ class ScreenText(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.shades: list[_Shade] = []
+        self._spare: dict = {}           # screen: its shade, hidden, kept for next time (put_away)
+        self._opening = object()         # this time the screens are frozen: what is read for an earlier one is let go
         self._reader = _Reader(self)
         self._reader.read.connect(self._read)
         self._closing = False
@@ -491,24 +501,34 @@ class ScreenText(QObject):
         if self.shades:
             return
         self._closing = False
-        for screen in QGuiApplication.screens():
+        self._opening = opening = object()
+        screens = QGuiApplication.screens()
+        for gone in [screen for screen in self._spare if screen not in screens]:
+            self._spare.pop(gone).deleteLater()
+        for screen in screens:
             picture = pictures.get(screen) if pictures is not None else screen.grabWindow(0)
             if picture is None or picture.isNull():
                 continue
-            self.shades.append(_Shade(self, screen, picture))
+            shade = self._spare.pop(screen, None)
+            if shade is not None:
+                shade.prepare(screen, picture)
+            else:
+                shade = _Shade(self, screen, picture)
+            self.shades.append(shade)
         under = QGuiApplication.screenAt(QCursor.pos())
         self.shades.sort(key=lambda shade: shade.screen() is not under)
         for shade in self.shades:
             shade.appear()
-        self._reader.start([(shade, shade.picture.toImage()) for shade in self.shades])   # QPixmaps stay here
+        self._reader.start([((shade, opening), shade.picture.toImage()) for shade in self.shades])   # QPixmaps stay here
         first = self.shades[0] if self.shades else None
         if first is not None:
             first.raise_()
             first.activateWindow()
             first.setFocus()
 
-    def _read(self, shade, lines, done: bool) -> None:
-        if shade in self.shades:
+    def _read(self, read_for, lines, done: bool) -> None:
+        shade, opening = read_for
+        if opening is self._opening and shade in self.shades:
             shade.take(lines, done)
 
     def chosen_on(self, shade) -> None:
@@ -551,4 +571,18 @@ class ScreenText(QObject):
         self._closing = True
         shades, self.shades = self.shades, []
         for shade in shades:
-            theme.fade_out(shade, shade.close, 140)
+            theme.fade_out(shade, lambda s=shade: self.put_away(s), 140)
+
+    def put_away(self, shade) -> None:
+        """A shade hidden, and kept for its screen: frozen again, its window is there already. Its
+        pictures are let go meanwhile (a screen's, twice over)."""
+        shade.hide()
+        if shade in self.shades:                 # (frozen again while it faded)
+            return
+        shade.picture = shade._dimmed = QPixmap()
+        shade.words, shade.rects, shade.chosen = [], [], []
+        screen = shade.screen()
+        if screen is None or screen in self._spare:
+            shade.deleteLater()
+        else:
+            self._spare[screen] = shade

@@ -340,6 +340,7 @@ class _Bridge(QObject):
     version_read = Signal(str, object, str)   # the app, (its exe, when that was changed), the version stamped in it
     sensors_known = Signal(object, str)       # Hanami Sensors as it is (sensors.State), what went wrong ('' if nothing)
     leftovers_cleared = Signal()
+    sound_moved = Signal()                    # Windows said the sound changed elsewhere (audio.watch)
     sound_done = Signal(object, object, object)   # what to do next, what the sound's work gave, what went wrong
     programs_scanned = Signal(object, bool)   # what runs (win32.running_programs), and whether to look at the sound too
 
@@ -513,6 +514,11 @@ class Controller(QObject):
         self._tray_stale = False                    # it has changed while open: made again once it closes
         self._audio = _AudioPoll(self._bridge.sound_polled.emit)
         self._sound = _SoundWork(self._bridge.sound_done)
+        self._bridge.sound_moved.connect(self._sound_moved)
+        try:
+            audio.watch(self._bridge.sound_moved.emit)
+        except (AttributeError, OSError):
+            traceback.print_exc()                   # not told, then: looked at every 2 s still
         self._bridge.programs_scanned.connect(self._running_seen)
         self._programs = _ProcessPoll(self._bridge.programs_scanned.emit)
         self._self_update: str | None = None       # the version of Hanami being put in
@@ -847,6 +853,12 @@ class Controller(QObject):
         except OSError:
             now = ''
         self._show_sound(now)
+
+    def _sound_moved(self) -> None:
+        """Windows said the sound changed - the volume keys, its own flyout, another app, an output
+        plugged in: what is in sight shows it now, not at the next look."""
+        if self._sound_toggles() or self.panel.isVisible():
+            self._audio.ask(mic=self.panel.isVisible())
 
     def _sound_polled(self, now: str, muted, volume=NOT_ASKED) -> None:
         self._show_sound(now)

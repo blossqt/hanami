@@ -1203,6 +1203,23 @@ class PanelTests(_Controlled):
                             Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
         self.panel.wheelEvent(event)
 
+    def _wait_for(self, done, seconds: float = 3.0) -> None:
+        until = time.monotonic() + seconds
+        while not done() and time.monotonic() < until:
+            qt.processEvents()
+            time.sleep(0.01)
+
+    def test_a_volume_changed_elsewhere_shows_at_once(self):
+        # The keyboard's volume keys, Windows' flyout: told by Windows, not seen at the next look.
+        self.volume_now = 40
+        self._open()
+        self._wait_for(lambda: self.panel.volume.value == 40)
+        self.assertEqual(self.panel.volume.value, 40)
+        self.volume_now = 65
+        self.controller._bridge.sound_moved.emit()          # as Windows' thread does (audio.watch)
+        self._wait_for(lambda: self.panel.volume.value == 65, 0.4)
+        self.assertEqual(self.panel.volume.value, 65, 'shown well before the next look, 2 s on')
+
     def test_the_microphone_button(self):
         from unittest import mock
         state = {'muted': False}
