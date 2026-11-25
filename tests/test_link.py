@@ -114,6 +114,35 @@ class LinkTest(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 hanami.kill()
 
+    def test_click_arrives_at_once(self):
+        # The link used to look at the pipe every 100 ms, so a click waited ~50 ms on average.
+        # Now its thread wakes when Hanami writes: a click should take a few milliseconds at most.
+        arrived = threading.Event()
+        times = []
+        link = SuiteLink('Quick', retry=0.5, on_click=lambda _id: (times.append(time.perf_counter()), arrived.set()))
+        link.set_menu([{'id': 'go', 'text': 'Go'}])
+        link.start()
+        hanami = self.start_hanami()
+        try:
+            wait(lambda: 'Quick' in self.state().get('members', {}), 10, 'the app to join')
+            delays = []
+            for _ in range(20):
+                arrived.clear()
+                sent = time.perf_counter()
+                self.assertEqual(self.send('click Quick go'), 'True')
+                self.assertTrue(arrived.wait(2), 'the click never arrived')
+                delays.append(times[-1] - sent)
+            delays.sort()
+            print(f'\nclick to app: median {delays[10] * 1000:.1f} ms, worst {delays[-1] * 1000:.1f} ms')
+            self.assertLess(delays[10], 0.02)
+            link.stop()
+        finally:
+            self.send('quit')
+            try:
+                hanami.wait(10)
+            except subprocess.TimeoutExpired:
+                hanami.kill()
+
     def test_two_apps_and_a_stale_copy(self):
         hanami = self.start_hanami()
         try:
