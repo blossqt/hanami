@@ -142,7 +142,7 @@ class ChoicesTests(unittest.TestCase):
 
 class GlassClearTests(unittest.TestCase):
     """How see-through the glass is: chosen in Hanami (0 to 100), its tint thinned or thickened to
-    match."""
+    match. 50 is what 100 was until 2026-11-26; beyond it, clearer still."""
 
     def setUp(self):
         self._key = suitetheme._LOOK_KEY
@@ -163,11 +163,11 @@ class GlassClearTests(unittest.TestCase):
         self.assertEqual(suitetheme.veil().alpha(), 112 if suitetheme.is_dark() else 64)
 
     def test_clearer_thins_the_tint_and_less_clear_thickens_it(self):
-        suitetheme.set_glass_clear(100)
-        self.assertEqual(suitetheme._clear_scaled(160), 0, 'fully clear: no tint')
-        self.assertEqual(suitetheme.veil().alpha(), 0, "a window's veil too")
-        suitetheme.set_glass_clear(75)
-        self.assertEqual(suitetheme._clear_scaled(160), 80)
+        suitetheme.set_glass_clear(50)
+        self.assertEqual(suitetheme._clear_scaled(160), 0, 'no tint of its own')
+        self.assertEqual(suitetheme.veil().alpha(), 0, "a window's veil too (over Acrylic)")
+        suitetheme.set_glass_clear(40)
+        self.assertEqual(suitetheme._clear_scaled(160), 64)
         suitetheme.set_glass_clear(0)
         self.assertEqual(suitetheme._clear_scaled(160), 255, 'twice as thick, as far as it goes')
         suitetheme.set_glass_clear(250)
@@ -176,16 +176,39 @@ class GlassClearTests(unittest.TestCase):
     def test_text_behind_still_tints_it_however_clear(self):
         """At 85% the user once saw the text behind a window read as clearly as the window's own:
         what text behind adds to the tint stays, mostly, however clear the glass is chosen."""
-        suitetheme.set_glass_clear(50)
+        suitetheme.set_glass_clear(25)
         self.assertEqual(suitetheme._clear_scaled(40, 150, 235), 190, 'as it has always been')
-        suitetheme.set_glass_clear(85)
+        suitetheme.set_glass_clear(42)
         self.assertEqual(suitetheme._clear_scaled(40, 0, 235), 12, 'calm behind: clear')
-        self.assertGreaterEqual(suitetheme._clear_scaled(40, 150, 235), 130, 'text behind: still tinted')
+        self.assertGreaterEqual(suitetheme._clear_scaled(40, 150, 235), 120, 'text behind: still tinted')
+        suitetheme.set_glass_clear(100)
+        self.assertEqual(suitetheme._clear_scaled(40, 150, 235), 75, 'at 100%: half of it')
+
+    def test_beyond_the_former_most_everything_thins_further(self):
+        """The user found the former 100% "about 60%" see-through (2026-11-26): past it, the
+        panels thin, and a framed window swaps Acrylic for a plain blur under a thinning veil."""
+        suitetheme.set_glass_clear(50)
+        panel, veil = suitetheme.panel_fill().alpha(), suitetheme._acrylic_like().alpha()
+        suitetheme.set_glass_clear(51)
+        self.assertGreater(suitetheme.veil().alpha(), veil * 0.95, "Acrylic's stand-in starts as thick as it")
+        suitetheme.set_glass_clear(100)
+        self.assertLess(suitetheme.panel_fill().alpha(), panel * 0.7)
+        self.assertLess(suitetheme.veil().alpha(), veil * 0.3)
+        self.assertGreater(suitetheme.veil().alpha(), 0, 'still frosted a little')
+
+    def test_a_choice_on_the_former_scale_is_kept_as_it_looked(self):
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, TEST_KEY) as key:
+            winreg.SetValueEx(key, 'GlassClear', 0, winreg.REG_DWORD, 100)
+        self.assertEqual(suitetheme.glass_clear(), 50, 'the former 100% is 50% now')
+        suitetheme.set_glass_clear(80)
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, TEST_KEY) as key:
+            self.assertEqual(winreg.QueryValueEx(key, 'GlassTransparency')[0], 80)
+            self.assertEqual(winreg.QueryValueEx(key, 'GlassClear')[0], 100, 'older copies: as clear as they go')
 
     def test_another_app_takes_it_within_seconds(self):
         suitetheme.glass_clear()
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, TEST_KEY) as key:      # as Hanami, elsewhere
-            winreg.SetValueEx(key, 'GlassClear', 0, winreg.REG_DWORD, 30)
+            winreg.SetValueEx(key, 'GlassTransparency', 0, winreg.REG_DWORD, 30)
         called = []
         suitetheme.on_restyle(lambda: called.append(True))
         suitetheme._look_changed()
@@ -256,7 +279,7 @@ class LensTests(unittest.TestCase):
         window = QWidget()
         window._suite_tone = tone
         with mock.patch.object(suitetheme, 'is_dark', return_value=False), \
-                mock.patch.object(suitetheme, 'glass_clear', return_value=100):
+                mock.patch.object(suitetheme, 'glass_clear', return_value=suitetheme.CLEAR_FORMER_MOST):
             alpha = suitetheme._frost_tint(window) / 255
         self.assertGreater(tone[2] * (1 - alpha) + alpha, 0.5, 'the dark half is brought up behind dark words')
         calm = QPixmap(64, 64)
