@@ -187,6 +187,9 @@ class GlassClearTests(unittest.TestCase):
     def test_beyond_the_former_most_everything_thins_further(self):
         """The user found the former 100% "about 60%" see-through (2026-11-26): past it, the
         panels thin, and a framed window swaps Acrylic for a plain blur under a thinning veil."""
+        glass = mock.patch.object(suitetheme, 'glass_on', return_value=True)     # offscreen has none
+        glass.start()
+        self.addCleanup(glass.stop)
         suitetheme.set_glass_clear(50)
         panel, veil = suitetheme.panel_fill().alpha(), suitetheme._acrylic_like().alpha()
         suitetheme.set_glass_clear(51)
