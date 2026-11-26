@@ -301,6 +301,7 @@ class SettingsWindow(QWidget):
         self.clear_shown = _label(f'{theme.glass_clear()}%', role='dim')
         self.clear_shown.setMinimumWidth(48)
         self.clear_slider.valueChanged.connect(self._clear_edited)
+        self.clear_slider.sliderReleased.connect(theme.glass_settled)
         row.addWidget(_label('Transparency'))
         row.addWidget(self.clear_slider, 1)
         row.addWidget(self.clear_shown)
@@ -763,6 +764,8 @@ class SettingsWindow(QWidget):
     def _clear_edited(self, value: int) -> None:
         self.clear_shown.setText(f'{value}%')
         theme.set_glass_clear(value)
+        if not self.clear_slider.isSliderDown():      # a click or a key: the panels take it now
+            theme.glass_settled()
 
     def _show_clear_enabled(self) -> None:
         """The transparency slider works only where there is glass."""
