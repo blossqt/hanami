@@ -1981,6 +1981,24 @@ class CompactCardsTests(unittest.TestCase):
         self.assertEqual(window._tier, launcher.FULL)
         self.assertEqual(card.quit.text(), 'Quit')
 
+    def test_buttons_keep_their_words_wherever_they_fit(self):
+        """Icons only when the words don't fit (the user: icons "when there's clearly so much space
+        left on each pill"): the version gives way first, and the words are never cut."""
+        from pathlib import Path
+        from hanami.ui import launcher
+        window = self.window
+        card = window.cards[self.names[0]]
+        card.show_state(launcher.CardState(exe=Path(sys.executable), running=True, in_tray=True, version='1.2.3',
+                                           installed=True, latest='1.2.4', update=True))
+        shown = [window.cards[n] for n in self.names]
+        width = 2 * max(c.least_width(launcher.WORDS) for c in shown) + launcher._SLIM_GAP + 2 * launcher._SLIM_MARGIN
+        self.size(width + 2, window.minimumHeight())
+        self.assertLessEqual(window._tier, launcher.WORDS)
+        for button, words in ((card.open, 'Open'), (card.update_button, 'Update'), (card.quit, 'Quit')):
+            self.assertEqual(button.text(), words)
+            self.assertGreaterEqual(button.width(), button.sizeHint().width(), f'{words} is cut')
+        self.assertEqual(card.name.toolTip(), '1.2.3')
+
     def test_a_button_shown_as_an_icon_still_says_what_it_does(self):
         from hanami.ui import launcher
         window = self.window
