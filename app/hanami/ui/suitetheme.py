@@ -449,6 +449,26 @@ def veil() -> QColor:
     return walled(QColor(10, 10, 12, _clear_scaled(112)) if is_dark() else QColor(250, 250, 252, _clear_scaled(64)))
 
 
+def _veil_for(window: QWidget) -> QColor:
+    """A framed window's veil (veil()) - and, drawing its glass from the screen (_painted), at least
+    READ_SHARE of what its words need to stay readable over what is behind it: over a dark page at
+    100%, the user's light-mode words were barely readable on the veil alone (2026-11-26)."""
+    color = veil()
+    tone = getattr(window, '_suite_tone', None) if _painted(window) else None
+    if tone is None:
+        return color
+    low, high = (tone[2], tone[3]) if len(tone) > 3 else (tone[0], tone[0])
+    if is_dark():
+        need = 255 * (1 - READ_DARK / high) if high > READ_DARK else 0.0
+    else:
+        need = 255 * (READ_LIGHT - low) / (1 - low) if low < READ_LIGHT else 0.0
+    color.setAlpha(max(color.alpha(), min(255, round(need * READ_SHARE))))
+    return color
+
+
+READ_SHARE = 0.75         # how much of that a framed window's veil gives, at the clearest
+
+
 ACRYLIC_CLEAREST = 0.1    # how much of Acrylic's frosting a framed window keeps at 100% transparency
 
 
@@ -952,7 +972,7 @@ def panel_fill() -> QColor:
     return QColor(16, 15, 20, _panel_alpha(175)) if is_dark() else QColor(255, 255, 255, _panel_alpha(190))
 
 
-PANEL_CLEAREST = 0.5      # a panel's tint at 100% transparency, as a share of its own
+PANEL_CLEAREST = 0.6      # a panel's tint at 100% transparency, as a share of its own
 
 
 def _panel_alpha(alpha: int) -> int:
@@ -1559,7 +1579,7 @@ class _Frosting(QObject):
                 if lens is not None:                        # clearer than Acrylic goes: its own glass
                     painter.drawPixmap(QRectF(0, 0, lens.width() / lens.devicePixelRatio(),
                                               lens.height() / lens.devicePixelRatio()), lens, QRectF(lens.rect()))
-                painter.fillRect(event.rect(), veil())      # frosted: Windows' blur under a plain tint, no rim
+                painter.fillRect(event.rect(), _veil_for(obj))   # frosted: Windows' blur under a plain tint, no rim
                 painter.end()
             if getattr(obj, '_suite_backdrop', None):
                 return _paint_backdrop(obj, event)
