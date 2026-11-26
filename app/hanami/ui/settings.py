@@ -451,7 +451,7 @@ class SettingsWindow(QWidget):
 
     def _updates(self, check: bool, notify: bool, auto: bool, hanami: bool = True) -> QWidget:
         page, layout = self._page('Updates', '')
-        frame, box = _section('Updates')
+        frame, box = _section('')
         # One choice where there were three switches: telling or installing needs looking, and
         # an app that installs by itself needs no telling.
         group, choices = suitesettings.group('When an app has an update')
@@ -500,7 +500,7 @@ class SettingsWindow(QWidget):
 
     def _about(self) -> QWidget:
         page, layout = self._page('About', '')
-        frame, box = _section('Hanami')
+        frame, box = _section('')
         row = QHBoxLayout()
         row.setSpacing(16)
         logo = theme.Label()
