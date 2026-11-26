@@ -3,6 +3,7 @@ buttons to install, start, update or quit it."""
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -69,16 +70,19 @@ class CardState:
 
 # How much of a card shows, roomiest first: the window takes the first that fits it, so nothing is
 # ever cut off. FULL: what the app does and its buttons under its name. BRIEF: without what it does.
-# LINE: one line, its buttons beside its name. ICONS: the same, with the buttons as icons.
-FULL, BRIEF, LINE, ICONS = range(4)
-TIERS = (FULL, BRIEF, LINE, ICONS)
+# LINE: one line, its buttons beside its name. WORDS: the same without the version, so the buttons
+# keep their words (the user, 2026-11-26: icons "when there's clearly so much space left on each
+# pill"). ICONS: the same, with the buttons as icons, only where their words don't fit.
+FULL, BRIEF, LINE, WORDS, ICONS = range(5)
+TIERS = (FULL, BRIEF, LINE, WORDS, ICONS)
 _ROOMY_PAD, _SLIM_PAD = 16, 12          # a card's padding
 _ROOMY_MARGIN, _SLIM_MARGIN = 24, 16    # the window's
 _ROOMY_GAP, _SLIM_GAP = 16, 8           # between cards
 _ICON = 44
 _NO_LIMIT = 16777215                    # Qt's QWIDGETSIZE_MAX, which PySide doesn't export
 _ICON_BUTTON = 30                       # a button's width, as an icon
-_BUTTON_PADDING = 40                    # a button's width, past its words
+_BUTTON_PADDING = 34                    # a button's width, past its words: suitetheme's 16 px padding
+                                        # each side and its 1 px border
 
 _BUSY = {'download': 'Downloading', 'unpack': 'Unpacking', 'check': 'Verifying',
          'place': 'Installing', 'quit': 'Waiting for the app to quit', 'remove': 'Removing'}
@@ -254,15 +258,22 @@ class AppCard(QFrame):
     def _buttons_width(self, icons_only: bool) -> int:
         if not self._words:
             return 0
-        metrics = self.open.fontMetrics()
-        each = [_ICON_BUTTON if icons_only else metrics.horizontalAdvance(w) + _BUTTON_PADDING for w in self._words]
+        if icons_only:
+            each = [_ICON_BUTTON] * len(self._words)
+        else:                           # Install and Update are pink, their words semibold, so wider
+            plain = QFontMetricsF(self.open.font())
+            bold = QFont(self.open.font())
+            bold.setWeight(QFont.DemiBold)
+            strong = QFontMetricsF(bold)
+            each = [math.ceil((strong if w in ('Install', 'Update') else plain).horizontalAdvance(w)) + _BUTTON_PADDING
+                    for w in self._words]
         return sum(each) + 8 * (len(each) - 1)
 
     def least_width(self, tier: int) -> int:
         """The narrowest this card reads at, showing that much."""
         self.name.ensurePolished()
         title = self.name.sizeHint().width()
-        if tier != ICONS:
+        if tier < WORDS:
             title += 8 + self.version.sizeHint().width()
         corner = 8 + 8 + 28             # the dot and the ⋯, and what parts them from the name
         if tier <= BRIEF:
@@ -319,7 +330,7 @@ class AppCard(QFrame):
             self.row.setAlignment(self.icon, Qt.AlignVCenter if slim else Qt.AlignTop)
             self._exe = None                # drawn afresh at its new size
         self.about.setVisible(tier == FULL)
-        self.version.setVisible(tier != ICONS)
+        self.version.setVisible(tier < WORDS)
         self.gap_name.changeSize(0, 16 if tier == FULL else 0, QSizePolicy.Minimum, QSizePolicy.Fixed)
         if icons != was_icons:
             for button in (self.open, self.update_button, self.quit, self.cancel):
@@ -409,6 +420,7 @@ class AppCard(QFrame):
         self._state = s
         self._show_icon(s.exe)
         self.version.setText(s.version or (s.latest if s.exe is None else ''))     # not here yet: the newest
+        self.name.setToolTip(self.version.text())     # still there to read where the version is hidden
         c = theme.colors()
         dim = c.dim.name()
         if s.busy:
