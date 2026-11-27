@@ -1999,6 +1999,36 @@ class CompactCardsTests(unittest.TestCase):
             self.assertGreaterEqual(button.width(), button.sizeHint().width(), f'{words} is cut')
         self.assertEqual(card.name.toolTip(), '1.2.3')
 
+    def test_names_sit_level_with_their_icons(self):
+        """On one line the name's capitals are centred on the icon, in words and as icons; roomy,
+        their top meets the icon's (the user: "make sure the app names are centered against their icon")."""
+        from PySide6.QtCore import QPoint
+        from hanami.ui import launcher
+        window = self.window
+
+        def caps(card):
+            top = card.name.mapTo(card, QPoint(0, card.name.contentsRect().top())).y() + card._caps_below_top()
+            return top, top + card._cap
+
+        def icon(card):
+            top = card.icon.mapTo(card, QPoint(0, 0)).y()
+            return top, top + card.icon.height()
+
+        width = 2 * max(window.cards[n].least_width(launcher.WORDS) for n in self.names) + launcher._SLIM_GAP \
+            + 2 * launcher._SLIM_MARGIN
+        for size in ((width + 2, window.minimumHeight()), (window.minimumWidth(), window.minimumHeight())):
+            self.size(*size)
+            self.assertGreaterEqual(window._tier, launcher.LINE, size)
+            for name in self.names:
+                card = window.cards[name]
+                (ct, cb), (it, ib) = caps(card), icon(card)
+                self.assertLessEqual(abs((ct + cb) / 2 - (it + ib) / 2), 1, (size, name))
+        self.size(1000, 900)
+        self.assertEqual(window._tier, launcher.FULL)
+        for name in self.names:
+            card = window.cards[name]
+            self.assertLessEqual(abs(caps(card)[0] - icon(card)[0]), 1, name)
+
     def test_a_button_shown_as_an_icon_still_says_what_it_does(self):
         from hanami.ui import launcher
         window = self.window
