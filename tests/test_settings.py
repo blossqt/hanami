@@ -1957,6 +1957,8 @@ class CentredTextTests(unittest.TestCase):
                 self.assertEqual(suitesettings.misaligned(window), [], title)
         finally:
             window.close()
+            from hanami.ui import suitetheme
+            suitetheme._clear_value = None          # read here: the glass tests read it afresh
 
 
 class CompactCardsTests(unittest.TestCase):
