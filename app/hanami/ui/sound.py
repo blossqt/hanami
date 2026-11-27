@@ -253,6 +253,6 @@ class SoundPopup(QWidget):
         draw_mark(painter, QRectF(18, 0, 24, HEIGHT), self.glyph, QColor(theme.ink()), 20)
         painter.setFont(theme.font(10.5, QFont.DemiBold))
         painter.setPen(c.text)
-        painter.drawText(rect.adjusted(56, 0, -18, 0), Qt.AlignVCenter | Qt.AlignLeft,
+        theme.draw_line(painter, rect.adjusted(56, 0, -18, 0), Qt.AlignVCenter | Qt.AlignLeft,
                          QFontMetrics(painter.font()).elidedText(self.name, Qt.ElideRight, int(rect.width()) - 74))
         painter.end()
