@@ -163,6 +163,7 @@ class AppCard(QFrame):
         heading.setSpacing(8)
         name = self.name = _serif(app.name, 13)
         heading.addWidget(name, 0, Qt.AlignTop)
+        name.setContentsMargins(0, -self._caps_below_top_of(name), 0, 0)   # its capitals' top level with the icon's
         self.version = _label('', theme.TYPE['caption'], role='dim')
         # Centred on the name's capitals (the user's wish), not on its baseline: both boxes are their
         # ink, the name's from the top of its capitals
@@ -317,9 +318,14 @@ class AppCard(QFrame):
             self.status.layout().setContentsMargins(0, 8 if slim else 16, 0, 0)
             # one line, the name's capitals level with the middle of the buttons
             row = button_h if slim else round(self._cap)
-            drop = (button_h - round(self._cap)) // 2 if slim else 0
+            # The name's box starts at its tallest letter (the k of Keytap, the H of Hub stand above
+            # the capitals) and a pixel over it: its capitals sit that much lower in the box, which
+            # left them 2-3 px under the middle of the icon (the user, 2026-11-27: "make sure the
+            # app names are centered against their icon"). Roomy, the capitals' top meets the icon's.
+            over = self._caps_below_top()
+            drop = ((button_h - round(self._cap)) // 2 if slim else 0) - over
             self.name.setContentsMargins(0, drop, 0, 0)
-            self.version.setContentsMargins(0, drop + self._version_drop, 0, 0)
+            self.version.setContentsMargins(0, drop + over + self._version_drop, 0, 0)
             self.dot.setFixedHeight(row)
             self.more.setFixedSize(28, row)
             size = button_h if slim else _ICON
@@ -346,6 +352,15 @@ class AppCard(QFrame):
         self.column.invalidate()
         self._shown = None
         self.show_state(self._state)
+
+    def _caps_below_top(self) -> int:
+        return self._caps_below_top_of(self.name)
+
+    @staticmethod
+    def _caps_below_top_of(name) -> int:
+        """How far under the top of the name's box its capitals start."""
+        metrics = QFontMetricsF(name.font(), name)
+        return max(0, round(metrics.ascent() - name._trims()[0] - metrics.capHeight()))
 
     def _dress(self, button: QPushButton, words: str, mark: str, tip: str = '') -> None:
         """A button's words, or its icon where there is room for only that."""
