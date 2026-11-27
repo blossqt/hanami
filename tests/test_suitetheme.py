@@ -199,6 +199,17 @@ class GlassClearTests(unittest.TestCase):
         self.assertLess(suitetheme.veil().alpha(), veil * 0.3)
         self.assertGreater(suitetheme.veil().alpha(), 0, 'still frosted a little')
 
+    def test_a_framed_window_moving_shows_acrylic_then_its_own_glass_again(self):
+        """Dragging a framed window that draws its own glass stuttered (2026-11-26): while it moves
+        it shows Acrylic, and its own glass comes back once it settles."""
+        window = QWidget()
+        suitetheme._hide_lens(window)
+        self.assertEqual(window._suite_lens_shown, 0.0)
+        with mock.patch.object(suitetheme, 'motion_on', return_value=False):
+            suitetheme._show_lens(window)
+        self.assertEqual(window._suite_lens_shown, 1.0)
+        window.close()
+
     def test_a_choice_on_the_former_scale_is_kept_as_it_looked(self):
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, TEST_KEY) as key:
             winreg.SetValueEx(key, 'GlassClear', 0, winreg.REG_DWORD, 100)
