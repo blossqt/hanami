@@ -186,34 +186,19 @@ class GlassClearTests(unittest.TestCase):
 
     def test_beyond_the_former_most_everything_thins_further(self):
         """The user found the former 100% "about 60%" see-through (2026-11-26): past it, the
-        panels thin, and a framed window swaps Acrylic for a plain blur under a thinning veil."""
+        panels thin; a framed window is Acrylic alone, drawn by Windows, so it stays smooth as it
+        is dragged (2026-11-27)."""
         glass = mock.patch.object(suitetheme, 'glass_on', return_value=True)     # offscreen has none
         glass.start()
         self.addCleanup(glass.stop)
         suitetheme.set_glass_clear(50)
-        panel, veil = suitetheme.panel_fill().alpha(), suitetheme._acrylic_like().alpha()
-        suitetheme.set_glass_clear(51)
-        self.assertGreater(suitetheme.veil().alpha(), veil * 0.95, "Acrylic's stand-in starts as thick as it")
+        panel = suitetheme.panel_fill().alpha()
         suitetheme.set_glass_clear(100)
-        self.assertLess(suitetheme.panel_fill().alpha(), panel * 0.7)
-        self.assertLess(suitetheme.veil().alpha(), veil * 0.3)
-        self.assertGreater(suitetheme.veil().alpha(), 0, 'still frosted a little')
-
-    def test_a_framed_window_moving_repaints_at_most_once_a_frame(self):
-        """Dragging a framed window that draws its own glass stuttered when it repainted for each
-        step (2026-11-26): repaints asked for within a frame of the last come together."""
+        self.assertLess(suitetheme.panel_fill().alpha(), panel * 0.5)
+        self.assertEqual(suitetheme.veil().alpha(), 0, 'Acrylic alone')
         window = QWidget()
-        window._suite_painted_at = time.monotonic()
-        with mock.patch.object(window, 'update') as update:
-            suitetheme._repaint_soon(window)
-            suitetheme._repaint_soon(window)
-            self.assertEqual(update.call_count, 0, 'too soon: held')
-            self.assertTrue(window._suite_repaint_due)
-            deadline = time.monotonic() + 1
-            while window._suite_repaint_due and time.monotonic() < deadline:
-                app.processEvents()
-            self.assertEqual(update.call_count, 1, 'then once')
-        window.close()
+        window.setWindowFlags(Qt.Window)
+        self.assertFalse(suitetheme._painted(window), "a framed window doesn't draw its own glass")
 
     def test_a_choice_on_the_former_scale_is_kept_as_it_looked(self):
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, TEST_KEY) as key:
