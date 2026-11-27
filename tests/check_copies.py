@@ -10,7 +10,8 @@ Written once, here in Hanami, and copied into each app:
                     there (not Keyglow, which is only its window)
     suitetheme.py   the Qt apps, in ui\\: the pink, check boxes, colours, fonts and cards;
                     each app's ui\\theme.py imports it and adds its own colours
-    suitesettings.py the Qt apps, in ui\\: settings windows' pages, sections and switches
+    suitesettings.py the Qt apps, in ui\\ (Dockline: its package): settings windows' pages, sections
+                    and switches, with suiteicons.py and Geist Serif
     suitelog.py     the Qt apps and Homework Hub: a windowed exe's prints, tracebacks and
                     native crashes, in a log
     suiteocr.py     Dropshift: Windows' text recognition
@@ -45,10 +46,10 @@ COPIES = {
     ROOT / 'app' / 'hanami' / 'suitelink.py': QT_APPS + [KEYGLOW, DOCKLINE, DOCUMENTS / 'homework-hub'],
     ROOT / 'app' / 'hanami' / 'suitetray.py': QT_APPS,
     ROOT / 'app' / 'hanami' / 'ui' / 'suitetheme.py': [app / 'ui' for app in QT_APPS + [KEYGLOW]] + [DOCKLINE],
-    ROOT / 'app' / 'hanami' / 'ui' / 'suitesettings.py': [app / 'ui' for app in QT_APPS + [KEYGLOW]],
-    ROOT / 'app' / 'hanami' / 'ui' / 'suiteicons.py': [app / 'ui' for app in QT_APPS + [KEYGLOW]],
-    ROOT / 'app' / 'hanami' / 'ui' / 'GeistSerif-Regular.ttf': [app / 'ui' for app in QT_APPS + [KEYGLOW]],
-    ROOT / 'app' / 'hanami' / 'ui' / 'GeistSerif-OFL.txt': [app / 'ui' for app in QT_APPS + [KEYGLOW]],
+    ROOT / 'app' / 'hanami' / 'ui' / 'suitesettings.py': [app / 'ui' for app in QT_APPS + [KEYGLOW]] + [DOCKLINE],
+    ROOT / 'app' / 'hanami' / 'ui' / 'suiteicons.py': [app / 'ui' for app in QT_APPS + [KEYGLOW]] + [DOCKLINE],
+    ROOT / 'app' / 'hanami' / 'ui' / 'GeistSerif-Regular.ttf': [app / 'ui' for app in QT_APPS + [KEYGLOW]] + [DOCKLINE],
+    ROOT / 'app' / 'hanami' / 'ui' / 'GeistSerif-OFL.txt': [app / 'ui' for app in QT_APPS + [KEYGLOW]] + [DOCKLINE],
     ROOT / 'app' / 'hanami' / 'suitelog.py': QT_APPS + [KEYGLOW, DOCUMENTS / 'homework-hub'],
     ROOT / 'app' / 'hanami' / 'suiteocr.py': [DOCUMENTS / 'Dropshift' / 'app' / 'dropshift'],
     ROOT / 'app' / 'hanami' / 'suiteweb.py': [DOCUMENTS / 'Dropshift' / 'app' / 'dropshift',
