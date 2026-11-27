@@ -1937,6 +1937,28 @@ class MorphTests(unittest.TestCase):
             self.assertFalse(self.window.morph.isVisible())
 
 
+class CentredTextTests(unittest.TestCase):
+    """Every line of text on every settings page has its letters centred on the icon, switch,
+    button or box beside it - "Settings" by the logo too (the user, 2026-11-27: "Text not
+    centered man check all the text check all the spacing")."""
+
+    def test_every_page(self):
+        from PySide6.QtCore import QEventLoop, QTimer
+        from hanami.ui import suitesettings
+        window = SettingsWindow(['Keytap'], False, (True, True, False))
+        window.resize(900, 700)
+        window.show()
+        try:
+            for index, title in enumerate(window.nav.titles()):
+                window.nav.choose(index)
+                loop = QEventLoop()
+                QTimer.singleShot(400, loop.quit)
+                loop.exec()
+                self.assertEqual(suitesettings.misaligned(window), [], title)
+        finally:
+            window.close()
+
+
 class CompactCardsTests(unittest.TestCase):
     """The window shows less of each card as it shrinks, and never cuts one off."""
 

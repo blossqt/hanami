@@ -367,7 +367,7 @@ class _Stat(QWidget):
         line = QRectF(0, 0, self.width(), 18)
         painter.setFont(theme.font(9))
         painter.setPen(c.dim)
-        painter.drawText(line, Qt.AlignLeft | Qt.AlignVCenter, self.name)
+        theme.draw_line(painter, line, Qt.AlignLeft | Qt.AlignVCenter, self.name)
         painter.setFont(theme.font(9.5, QFont.DemiBold))
         painter.setPen(c.text)
         self._figures.paint(painter, line)
@@ -461,11 +461,11 @@ class _Level(QWidget):
         room, name = self.width() - 34, self.name
         if painter.fontMetrics().horizontalAdvance(name) > room and ' ' in name.strip():
             name = name.strip().split(' ', 1)[1]           # "DELL G2524H": the model says which
-        painter.drawText(line.adjusted(0, 0, -34, 0), Qt.AlignLeft | Qt.AlignVCenter | Qt.TextSingleLine,
+        theme.draw_line(painter, line.adjusted(0, 0, -34, 0), Qt.AlignLeft | Qt.AlignVCenter | Qt.TextSingleLine,
                          painter.fontMetrics().elidedText(name, Qt.ElideRight, room))
         painter.setFont(theme.font(9.5, QFont.DemiBold))
         painter.setPen(c.text)
-        painter.drawText(line, Qt.AlignRight | Qt.AlignVCenter, f'{self.value}%')
+        theme.draw_line(painter, line, Qt.AlignRight | Qt.AlignVCenter, f'{self.value}%')
         track = self._track()
         painter.setPen(Qt.NoPen)
         painter.setBrush(c.border)

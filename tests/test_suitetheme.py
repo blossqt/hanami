@@ -21,7 +21,7 @@ for name in ('SUITE_LOOK', 'SUITE_MODE', 'SUITE_MOTION'):
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'app'))
 
 from PySide6.QtCore import QEventLoop, QPoint, QRect, QRectF, QSize, Qt, QTimer  # noqa: E402
-from PySide6.QtGui import QColor, QFont, QPainter, QPixmap, QScreen  # noqa: E402
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPixmap, QScreen  # noqa: E402
 from PySide6.QtWidgets import (QApplication, QCheckBox, QLineEdit, QPushButton, QStyle, QToolButton,  # noqa: E402
                                QVBoxLayout, QWidget)
 
@@ -32,6 +32,59 @@ from hanami.ui import suitetheme  # noqa: E402
 TEST_KEY = r'Software\blossqt\SuiteThemeTest'
 # A game really in front would quiet the glass under these tests: none is, here (GameTests stands in its own).
 suitetheme.game_in_front = lambda: False
+
+
+class CentredTextTests(unittest.TestCase):
+    """One line of text is centred by its letters, top to baseline, its descenders hanging below:
+    not by its line's box (a pixel or two off by font) or its ink (a g lifted it) - the user,
+    2026-11-27, of "Settings" by its icon: "text not centered man check all the text"."""
+
+    @staticmethod
+    def ink_rows(paint, size=(160, 48)):
+        image = QPixmap(*size).toImage()
+        image.fill(Qt.white)
+        p = QPainter(image)
+        p.setPen(Qt.black)
+        paint(p)
+        p.end()
+        rows = [y for y in range(image.height())
+                if any(QColor(image.pixel(x, y)).lightness() < 128 for x in range(image.width()))]
+        return rows[0], rows[-1]
+
+    def test_a_line_drawn_centred_has_its_letters_in_the_middle(self):
+        for f in (suitetheme.font(10.5), suitetheme.serif(17), suitetheme.font(9, QFont.DemiBold)):
+            def draw(text):
+                def paint(p):
+                    p.setFont(f)
+                    suitetheme.draw_line(p, QRectF(0, 0, 160, 48), Qt.AlignLeft, text)
+                return paint
+            top, bottom = self.ink_rows(draw('HHHH'))
+            self.assertLessEqual(abs((top + bottom + 1) / 2 - 24), 1, f.family())
+            self.assertEqual(self.ink_rows(draw('Hgyp'))[0], top, 'a descender lifts nothing')
+
+    def test_a_label_by_something_taller_centres_its_letters(self):
+        for f in (suitetheme.font(10.5), suitetheme.serif(17)):
+            tops = []
+            for text in ('HHHH', 'Settings'):
+                line = suitetheme.Label(text)
+                line.setFont(f)
+                line.setFixedSize(160, max(44, line.centring_height()))
+                tops.append(self.ink_rows(lambda p: line.render(p, QPoint(0, 0)), (160, line.height()))[0] -
+                            (line.height() - 44) // 2)
+                letters = line.letters()
+                self.assertLessEqual(abs(sum(letters) / 2 - line.height() / 2), 1, text)
+            self.assertLessEqual(abs(tops[0] - tops[1]), 1, 'a g lifts nothing')
+
+    def test_a_buttons_words_are_centred_by_their_letters(self):
+        style = suitetheme.SuiteStyle()
+        for words in ('OK', 'Settings'):
+            def paint(p):
+                p.setFont(suitetheme.font(10.5))
+                style.drawItemText(p, QRect(0, 0, 160, 32), int(Qt.AlignCenter), app.palette(), True, words)
+            top, _ = self.ink_rows(paint, (160, 32))
+            base = suitetheme.baseline(QFontMetricsF(suitetheme.font(10.5)), words, 0, 32)
+            rise = suitetheme.rise(QFontMetricsF(suitetheme.font(10.5)), words)
+            self.assertLessEqual(abs(top - (base - rise)), 1, (words, top, base, rise))
 
 
 class LookTests(unittest.TestCase):
