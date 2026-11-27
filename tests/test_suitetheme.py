@@ -199,15 +199,20 @@ class GlassClearTests(unittest.TestCase):
         self.assertLess(suitetheme.veil().alpha(), veil * 0.3)
         self.assertGreater(suitetheme.veil().alpha(), 0, 'still frosted a little')
 
-    def test_a_framed_window_moving_shows_acrylic_then_its_own_glass_again(self):
-        """Dragging a framed window that draws its own glass stuttered (2026-11-26): while it moves
-        it shows Acrylic, and its own glass comes back once it settles."""
+    def test_a_framed_window_moving_repaints_at_most_once_a_frame(self):
+        """Dragging a framed window that draws its own glass stuttered when it repainted for each
+        step (2026-11-26): repaints asked for within a frame of the last come together."""
         window = QWidget()
-        suitetheme._hide_lens(window)
-        self.assertEqual(window._suite_lens_shown, 0.0)
-        with mock.patch.object(suitetheme, 'motion_on', return_value=False):
-            suitetheme._show_lens(window)
-        self.assertEqual(window._suite_lens_shown, 1.0)
+        window._suite_painted_at = time.monotonic()
+        with mock.patch.object(window, 'update') as update:
+            suitetheme._repaint_soon(window)
+            suitetheme._repaint_soon(window)
+            self.assertEqual(update.call_count, 0, 'too soon: held')
+            self.assertTrue(window._suite_repaint_due)
+            deadline = time.monotonic() + 1
+            while window._suite_repaint_due and time.monotonic() < deadline:
+                app.processEvents()
+            self.assertEqual(update.call_count, 1, 'then once')
         window.close()
 
     def test_a_choice_on_the_former_scale_is_kept_as_it_looked(self):
